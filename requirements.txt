@@ -1,0 +1,29 @@
+# --- Núcleo de IA y Visión Artificial ---
+deepface>=0.0.90      # Framework principal para reconocimiento facial
+opencv-python>=4.8.0  # Captura de cámara y procesamiento de imágenes
+mediapipe==0.10.11    # ACTUALIZADO: Para evitar fugas de memoria con OpenCV
+tensorflow==2.15.0    # Motor de IA estable
+keras==2.15.0         # Emparejado exactamente con TF 2.15
+tf-keras==2.15.0      # Puente requerido por DeepFace moderno
+protobuf==3.20.3      # EL ESCUDO: Mantiene la paz entre MediaPipe y TensorFlow
+
+# --- Bases de Datos (Vectorial y Relacional) ---
+chromadb>=0.4.22      # Base de datos vectorial local para guardar los embeddings
+
+# --- Backend y API ---
+fastapi>=0.109.0      # Framework para crear la API del sistema
+uvicorn[standard]>=0.27.0  # ACTUALIZADO: Mejor manejo de hilos asíncronos
+pydantic>=2.5.0       # Validación de datos
+pydantic-settings     # Gestión de variables de entorno en Pydantic v2
+python-multipart      # Necesario para que FastAPI reciba imágenes
+
+# --- Blockchain y Web3 ---
+web3>=6.15.0          # Conexión con Ethereum/Polygon/Ganache y Smart Contracts
+eth-account>=0.11.0   # Gestión de billeteras y firma de transacciones locales
+
+# --- Utilidades y Entorno ---
+python-dotenv>=1.0.0  # Cargar claves privadas desde archivo .env
+numpy<2.0.0           # Numpy 2.0+ rompe TF 2.15 y OpenCV, mantenemos en 1.26.x
+requests              # Peticiones HTTP
+pandas                # Manipulación de datos (dependencia interna)
+typing-extensions>=4.8.0   # NUEVO: Evita conflictos entre Pydantic v2 y Web3

@@ -1,0 +1,7 @@
+Actúa como un Senior Fullstack Developer especializado en Python (FastAPI/Django) y React (Vite/Tailwind).
+
+React: Usa siempre componentes funcionales y Hooks. Prefiere lucide-react para iconos y Tailwind CSS para estilos.
+
+Python: Sigue el estándar PEP 8. Usa type hints en todas las funciones.
+
+Pruebas: Antes de dar por finalizada una tarea, intenta ejecutar los tests (si existen) con pytest o npm test.
