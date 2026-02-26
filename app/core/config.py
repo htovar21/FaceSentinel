@@ -21,10 +21,20 @@ class Settings(BaseSettings):
     SMART_CONTRACT_ADDRESS: str = ""
     DEVICE_PRIVATE_KEY: str = ""
 
-    class Config:
-        # Le dice a Pydantic que busque las variables en el archivo .env
-        env_file = ".env"
-        env_file_encoding = 'utf-8'
+    # Seguridad — JWT
+    JWT_SECRET_KEY: str = "bioauth-web3-super-secret-key-change-in-production"
+    JWT_EXPIRATION_MINUTES: int = 60
+
+    # Seguridad — Rate Limiting
+    RATE_LIMIT_PER_MINUTE: int = 30
+
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        # Ignorar variables del .env que no estén definidas en esta clase
+        # (ej: WEB3_PROVIDER_URI, ADMIN_ADDRESS, ADMIN_PRIVATE_KEY son leídas por otros módulos con os.getenv)
+        "extra": "ignore",
+    }
 
 # Creamos una instancia global para usarla en todo el proyecto
 settings = Settings()
