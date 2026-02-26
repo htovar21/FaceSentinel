@@ -20,6 +20,11 @@ python-multipart      # Necesario para que FastAPI reciba imágenes
 # --- Blockchain y Web3 ---
 web3>=6.15.0          # Conexión con Ethereum/Polygon/Ganache y Smart Contracts
 eth-account>=0.11.0   # Gestión de billeteras y firma de transacciones locales
+py-solc-x>=2.0.0      # Compilador de Solidity para desplegar contratos desde Python
+
+# --- Seguridad ---
+PyJWT>=2.8.0          # Generación y validación de JSON Web Tokens (JWT)
+slowapi>=0.1.9        # Rate limiting para FastAPI (protección contra fuerza bruta)
 
 # --- Utilidades y Entorno ---
 python-dotenv>=1.0.0  # Cargar claves privadas desde archivo .env
@@ -27,3 +32,5 @@ numpy<2.0.0           # Numpy 2.0+ rompe TF 2.15 y OpenCV, mantenemos en 1.26.x
 requests              # Peticiones HTTP
 pandas                # Manipulación de datos (dependencia interna)
 typing-extensions>=4.8.0   # NUEVO: Evita conflictos entre Pydantic v2 y Web3
+scikit-image>=0.22.0  # Análisis de textura (LBP) para anti-spoofing avanzado
+scipy>=1.11.0         # Análisis de frecuencia (FFT) para detección de impresiones
