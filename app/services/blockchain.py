@@ -79,9 +79,9 @@ def init_blockchain():
         contract_address = Web3.to_checksum_address(settings.SMART_CONTRACT_ADDRESS)
         _contract = _w3.eth.contract(address=contract_address, abi=abi)
 
-        # Configurar cuenta administradora
-        _admin_account = os.getenv("ADMIN_ADDRESS", "")
-        _private_key = os.getenv("ADMIN_PRIVATE_KEY", settings.DEVICE_PRIVATE_KEY)
+        # Configurar cuenta administradora desde settings (cargado desde .env)
+        _admin_account = settings.ADMIN_ADDRESS
+        _private_key = settings.ADMIN_PRIVATE_KEY or settings.DEVICE_PRIVATE_KEY
 
         if not _admin_account or not _private_key:
             logger.warning(

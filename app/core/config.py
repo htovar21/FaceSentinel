@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     
     # Web3
     BLOCKCHAIN_RPC_URL: str = "http://127.0.0.1:7545"
-    CHAIN_ID: int = 5777
+    CHAIN_ID: int = 1337
     SMART_CONTRACT_ADDRESS: str = ""
     DEVICE_PRIVATE_KEY: str = ""
+    # Cuenta administradora de la blockchain (leída directamente del .env)
+    ADMIN_ADDRESS: str = ""
+    ADMIN_PRIVATE_KEY: str = ""
 
     # Seguridad — JWT
     JWT_SECRET_KEY: str = "bioauth-web3-super-secret-key-change-in-production"
