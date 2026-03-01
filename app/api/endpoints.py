@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.api.schemas import UserRegister, AuthRequest, AuthResponse, BlockchainInfoResponse
 
 # Importamos las funciones reales de IA que creamos en el paso anterior
-from app.services.face_recognition import register_face, verify_face
+from app.services.face_recognition import register_face, verify_face, remove_face
 
 # Importamos el servicio de blockchain
 from app.services.blockchain import (
@@ -60,11 +60,26 @@ def authenticate_user(auth_data: AuthRequest):
     return AuthResponse(
         success=True,
         message=result["message"],
+        user_id=result.get("user_id"),
         user_name=result["name"],
         role=result.get("role"),
         match_score=result["distance"],
         tx_hash=bc_result.get("tx_hash"),
     )
+
+
+@router.delete("/users/{user_id}", tags=["Autenticación y Registro"])
+def delete_user_account(user_id: str):
+    """
+    Elimina un usuario del sistema, borrando sus vectores de ChromaDB
+    y su perfil en la base de datos SQLite.
+    (Nota: Los registros enviados a la blockchain son inmutables y no se pueden borrar).
+    """
+    result = remove_face(user_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+        
+    return result
 
 
 # =========================================================================

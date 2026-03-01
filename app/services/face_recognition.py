@@ -9,7 +9,7 @@ import numpy as np
 import base64
 from deepface import DeepFace
 from app.core.config import settings
-from app.services.storage import face_collection, save_user_data, get_user_by_id
+from app.services.storage import face_collection, save_user_data, get_user_by_id, delete_user
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,22 @@ def base64_to_image(base64_string: str):
     """Convierte la imagen en texto (Base64) que envía el Frontend a un formato de matriz NumPy para OpenCV."""
     if "," in base64_string:
         base64_string = base64_string.split(",")[1]
+        
+    if not base64_string:
+        raise ValueError("La cadena Base64 recibida está vacía")
 
-    img_data = base64.b64decode(base64_string)
+    # Asegurar padding
+    base64_string += "=" * ((4 - len(base64_string) % 4) % 4)
+
+    try:
+        img_data = base64.b64decode(base64_string)
+    except Exception as e:
+        raise ValueError(f"No se pudo decodificar Base64: {e}")
+
     nparr = np.frombuffer(img_data, np.uint8)
+    if nparr.size == 0:
+        raise ValueError("El buffer de imagen está vacío")
+        
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if img is None:
@@ -130,3 +143,23 @@ def verify_face(base64_image: str):
             "success": False,
             "message": f"Acceso denegado. Rostro desconocido (Distancia: {distance:.2f})"
         }
+
+
+def remove_face(user_id: str) -> dict:
+    """Elimina toda huella biométrica y de registro de un usuario en el sistema"""
+    # 1. Eliminar datos en memoria ChromaDB
+    try:
+        face_collection.delete(
+            where={"user_id": user_id}
+        )
+        logger.info(f"🗑️ Vectores biométricos eliminados para: {user_id}")
+    except Exception as e:
+        logger.error(f"Error al eliminar de ChromaDB: {e}")
+        return {"success": False, "message": "Error al eliminar datos biométricos"}
+
+    # 2. Eliminar del registro SQLite
+    success = delete_user(user_id)
+    if not success:
+        return {"success": False, "message": "El usuario no existe en la base de datos."}
+
+    return {"success": True, "message": "Usuario y modelo biométrico eliminados con éxito."}

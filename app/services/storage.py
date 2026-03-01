@@ -112,6 +112,20 @@ def get_user_by_id(user_id: str):
     return None
 
 
+def delete_user(user_id: str) -> bool:
+    """Elimina un usuario de la base de datos local SQLite."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if deleted:
+        logger.info(f"🗑️ Usuario eliminado localmente: {user_id}")
+    return deleted
+
+
 def get_all_users():
     """Retorna todos los usuarios registrados."""
     conn = _get_connection()

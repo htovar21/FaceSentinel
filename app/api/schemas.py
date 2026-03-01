@@ -20,6 +20,7 @@ class AuthRequest(BaseModel):
 class AuthResponse(BaseModel):
     success: bool
     message: str
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     role: Optional[str] = None      
     match_score: Optional[float] = None
