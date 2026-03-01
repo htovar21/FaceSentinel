@@ -12,7 +12,7 @@ interface AuthEvent {
     match_score: number
     device_id: string
     tx_hash: string
-    timestamp: string
+    timestamp: number
 }
 
 export default function Dashboard() {
@@ -207,7 +207,7 @@ export default function Dashboard() {
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {new Date(log.timestamp).toLocaleString()}
+                                                    {new Date((log.timestamp as any) * 1000).toLocaleString()}
                                                 </td>
                                                 <td className="px-4 py-3 font-mono">
                                                     {log.match_score !== null && log.match_score !== undefined
