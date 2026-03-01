@@ -1,6 +1,6 @@
-# BioAuth-Web3 🛡️🔗
+# FaceSentinel 🛡️🔗
 
-**BioAuth-Web3** es un sistema profesional de autenticación biométrica (reconocimiento facial) que integra medidas de seguridad anti-spoofing de vanguardia y registra los eventos en una red blockchain para garantizar la inmutabilidad y la transparencia de los accesos.
+**FaceSentinel** es un sistema profesional de autenticación biométrica (reconocimiento facial) que integra medidas de seguridad anti-spoofing de vanguardia y registra los eventos en una red blockchain para garantizar la inmutabilidad y la transparencia de los accesos.
 
 Este proyecto forma parte de un Trabajo de Grado y está diseñado para asegurar que la autenticación no pueda ser vulnerada fácilmente usando fotografías fijas o pantallas (ataques de presentación).
 
@@ -52,7 +52,7 @@ Sigue este orden estricto para levantar el entorno completo.
 
 ### Paso 2: Preparar y Desplegar Backend
 
-Abre una terminal en la raíz del proyecto (`BioAuth-Web3`):
+Abre una terminal en la raíz del proyecto (`FaceSentinel`):
 
 ```bash
 # 1. Crear entorno virtual (solo la primera vez)

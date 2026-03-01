@@ -1,5 +1,5 @@
 """
-image_processing.py — Utilidades de Preprocesamiento de Imagen para BioAuth-Web3
+image_processing.py — Utilidades de Preprocesamiento de Imagen para FaceSentinel
 Funciones para normalizar, limpiar, y validar imágenes antes de pasarlas al motor de IA.
 """
 

@@ -1,5 +1,5 @@
 """
-security.py — Módulo de Seguridad para BioAuth-Web3
+security.py — Módulo de Seguridad para FaceSentinel
 Implementa JWT, API Keys, y protección de endpoints.
 """
 

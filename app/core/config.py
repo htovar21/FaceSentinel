@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # API
-    PROJECT_NAME: str = "BioAuth-Web3"
+    PROJECT_NAME: str = "FaceSentinel"
     API_V1_STR: str = "/api/v1"
     
     # Rutas
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     ADMIN_PRIVATE_KEY: str = ""
 
     # Seguridad — JWT
-    JWT_SECRET_KEY: str = "bioauth-web3-super-secret-key-change-in-production"
+    JWT_SECRET_KEY: str = "facesentinel-super-secret-key-change-in-production"
     JWT_EXPIRATION_MINUTES: int = 60
 
     # Seguridad — Rate Limiting

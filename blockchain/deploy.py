@@ -195,7 +195,7 @@ def update_env_file(contract_address):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  BioAuth-Web3 — Despliegue de Smart Contract")
+    print("  FaceSentinel — Despliegue de Smart Contract")
     print("=" * 60)
 
     # Paso 1: Compilar

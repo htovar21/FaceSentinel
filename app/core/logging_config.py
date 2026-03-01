@@ -1,5 +1,5 @@
 """
-logging_config.py — Configuración centralizada de logging para BioAuth-Web3
+logging_config.py — Configuración centralizada de logging para FaceSentinel
 Reemplaza todos los print() por un sistema de logs profesional
 con rotación de archivos y formato consistente.
 """

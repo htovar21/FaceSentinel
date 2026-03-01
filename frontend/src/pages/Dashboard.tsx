@@ -77,7 +77,7 @@ export default function Dashboard() {
                 <div className="container mx-auto flex h-16 items-center justify-between px-4">
                     <div className="flex items-center gap-2">
                         <ShieldCheck className="h-6 w-6 text-primary" />
-                        <span className="text-lg font-bold">BioAuth-Web3</span>
+                        <span className="text-lg font-bold">FaceSentinel</span>
                     </div>
                     <Button variant="ghost" size="sm" onClick={handleLogout}>
                         <LogOut className="h-4 w-4 mr-2" /> Salir

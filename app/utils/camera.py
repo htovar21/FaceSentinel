@@ -49,7 +49,7 @@ def draw_status_bar(frame, text, color=COLOR_WHITE, y_pos=30):
 
 def main():
     print("=" * 55)
-    print("  BioAuth-Web3 | Sistema de Autenticación Biométrica")
+    print("  FaceSentinel | Sistema de Autenticación Biométrica")
     print("=" * 55)
     print("⏳ Iniciando cliente de cámara...")
 
@@ -77,7 +77,7 @@ def main():
         # Dibujar interfaz
         draw_status_bar(frame, "R:Registrar | A:Autenticar | L:Liveness | Q:Salir", COLOR_WHITE, 25)
 
-        cv2.imshow("BioAuth-Web3 | Punto de Acceso", frame)
+        cv2.imshow("FaceSentinel | Punto de Acceso", frame)
 
         key = cv2.waitKey(1) & 0xFF
 
@@ -160,7 +160,7 @@ def main():
                 else:
                     draw_status_bar(liveness_frame, "NO SE DETECTA ROSTRO", COLOR_RED, 90)
 
-                cv2.imshow("BioAuth-Web3 | Punto de Acceso", liveness_frame)
+                cv2.imshow("FaceSentinel | Punto de Acceso", liveness_frame)
 
                 if cv2.waitKey(1) & 0xFF == ord('c'):
                     print("  Cancelado por el usuario.")

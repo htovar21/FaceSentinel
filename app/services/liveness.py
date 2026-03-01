@@ -1,5 +1,5 @@
 """
-liveness.py — Motor Anti-Spoofing Avanzado para BioAuth-Web3
+liveness.py — Motor Anti-Spoofing Avanzado para FaceSentinel
 Combina múltiples técnicas para detectar ataques de presentación:
 1. EAR (Eye Aspect Ratio) — Detección de parpadeo
 2. LBP (Local Binary Patterns) — Análisis de textura facial

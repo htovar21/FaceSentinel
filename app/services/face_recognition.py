@@ -1,5 +1,5 @@
 """
-face_recognition.py — Motor de Reconocimiento Facial BioAuth-Web3
+face_recognition.py — Motor de Reconocimiento Facial FaceSentinel
 Usa DeepFace con ArcFace para extraer embeddings y buscar coincidencias en ChromaDB.
 """
 

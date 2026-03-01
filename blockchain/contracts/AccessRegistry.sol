@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 /**
  * @title AccessRegistry
- * @author BioAuth-Web3
+ * @author FaceSentinel
  * @notice Contrato inteligente para el registro inmutable de eventos de
  *         autenticación biométrica facial. Diseñado para Ganache (desarrollo)
  *         con estructura lista para redes Ethereum/Polygon reales.

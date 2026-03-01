@@ -101,7 +101,7 @@ export default function Login() {
                             <UserCircle2 className="h-8 w-8" />
                         </div>
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight">Acceso a BioAuth-Web3</CardTitle>
+                    <CardTitle className="text-2xl font-bold tracking-tight">Acceso a FaceSentinel</CardTitle>
                     <CardDescription>
                         {step === "username" && "Inicia sesión con tu rostro para entrar"}
                         {step === "camera" && "Mira a la cámara para autenticarte"}

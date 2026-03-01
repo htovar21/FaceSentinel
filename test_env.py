@@ -24,7 +24,7 @@ else:
             break
             
         # Mostrar el frame en una ventana
-        cv2.imshow('Prueba BioAuth-Web3', frame)
+        cv2.imshow('Prueba FaceSentinel', frame)
         
         # Esperar 1 milisegundo a que se presione la tecla 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):

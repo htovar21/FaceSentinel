@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Inicializa servicios cuando arranca el servidor."""
     # --- STARTUP ---
-    logger.info("🚀 Iniciando BioAuth-Web3 API ...")
+    logger.info("🚀 Iniciando FaceSentinel API ...")
 
     # Inicializar módulo de seguridad
     init_security()
@@ -32,12 +32,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️  Blockchain no disponible. El sistema funciona sin ella.")
 
-    logger.info("✅ BioAuth-Web3 API lista y esperando conexiones.")
+    logger.info("✅ FaceSentinel API lista y esperando conexiones.")
 
     yield  # La aplicación corre aquí
 
     # --- SHUTDOWN ---
-    logger.info("👋 Apagando BioAuth-Web3 API ...")
+    logger.info("👋 Apagando FaceSentinel API ...")
 
 
 # Inicializar la aplicación FastAPI
@@ -103,7 +103,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def root():
     from app.services.blockchain import is_blockchain_available
     return {
-        "message": "Bienvenido a la API de BioAuth-Web3",
+        "message": "Bienvenido a la API de FaceSentinel",
         "status": "online",
         "blockchain": "connected" if is_blockchain_available() else "disconnected",
         "docs_url": "/docs"
