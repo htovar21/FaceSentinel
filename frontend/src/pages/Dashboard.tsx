@@ -41,7 +41,9 @@ export default function Dashboard() {
         // Cargar historial de acceso
         axios.get(`http://127.0.0.1:8000/api/v1/auth-history/${userId}`)
             .then(r => {
-                if (r.data.success) setAuthHistory(r.data.history)
+                if (r.data.success && r.data.records) {
+                    setAuthHistory(r.data.records)
+                }
             })
             .catch(err => console.error("Error cargando historial", err))
             .finally(() => setHistoryLoading(false))
@@ -208,10 +210,12 @@ export default function Dashboard() {
                                                     {new Date(log.timestamp).toLocaleString()}
                                                 </td>
                                                 <td className="px-4 py-3 font-mono">
-                                                    {log.match_score.toFixed(4)}
+                                                    {log.match_score !== null && log.match_score !== undefined
+                                                        ? log.match_score.toFixed(4)
+                                                        : "N/A"}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {log.tx_hash !== "N/A" ? (
+                                                    {log.tx_hash && log.tx_hash !== "N/A" ? (
                                                         <a
                                                             href={`#`}
                                                             className="text-primary hover:underline font-mono text-xs flex items-center"
@@ -220,7 +224,7 @@ export default function Dashboard() {
                                                             {log.tx_hash.substring(0, 10)}...{log.tx_hash.substring(log.tx_hash.length - 8)}
                                                         </a>
                                                     ) : (
-                                                        <span className="text-muted-foreground">Local / Error Web3</span>
+                                                        <span className="text-muted-foreground">Local / Sin TxHash</span>
                                                     )}
                                                 </td>
                                             </tr>
