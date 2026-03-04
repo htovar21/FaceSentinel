@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from app.api.schemas import UserRegister, AuthRequest, AuthResponse, BlockchainInfoResponse
 
 # Importamos las funciones reales de IA que creamos en el paso anterior
-from app.services.face_recognition import register_face, verify_face, remove_face
+from app.services.face_recognition import register_face, verify_face, remove_face, base64_to_image
 
 # Importamos el servicio de blockchain
 from app.services.blockchain import (
@@ -117,3 +117,73 @@ def blockchain_status():
     """
     info = get_contract_info()
     return BlockchainInfoResponse(**info)
+
+
+# =========================================================================
+#              WEBSOCKET PARA LIVENESS EN TIEMPO REAL
+# =========================================================================
+
+import json
+import cv2
+from app.services.liveness import BlinkTracker, analyze_blink
+
+@router.websocket("/ws/liveness")
+async def websocket_liveness(websocket: WebSocket):
+    """
+    Endpoint interactivo que recibe frames de video en tiempo real,
+    rastrea los ojos del usuario y detecta un parpadeo genuino.
+    """
+    await websocket.accept()
+    
+    # Tolerancia: ear_threshold=0.16 para asegurar que el usuario cerró intencionalmente 
+    # los ojos, y no un falso positivo por párpados naturalmente caídos o inicialización.
+    tracker = BlinkTracker(ear_threshold=0.16, consecutive_frames=1)
+    
+    try:
+        while True:
+            # Esperar el frame del frontend
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            base64_img = payload.get("image_base64", "")
+            
+            if not base64_img:
+                continue
+                
+            try:
+                # Usar la utilidad rápida de conversión
+                img_bgr = base64_to_image(base64_img)
+                img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                
+                # Obtener el estado básico (Presencia y EAR de los ojos)
+                has_face, ear = analyze_blink(img_rgb)
+                
+                if not has_face:
+                    await websocket.send_json({
+                        "status": "no_face", 
+                        "message": "Enfoca bien tu rostro en la cámara..."
+                    })
+                    continue
+                
+                # Actualizar el rastreador de parpadeo con el EAR actual
+                is_blinking = tracker.update(ear)
+                
+                if is_blinking:
+                    # ¡Parpadeo detectado con éxito!
+                    await websocket.send_json({
+                        "status": "passed", 
+                        "message": "¡Prueba de vida superada! Analizando identidad..."
+                    })
+                    # Romper el ciclo o dejar que el cliente cierre la conexión
+                else:
+                    await websocket.send_json({
+                        "status": "tracking", 
+                        "ear": round(ear, 3),
+                        "message": "Mirando a la cámara... Por favor, parpadea."
+                    })
+                    
+            except ValueError as e:
+                # Error decodificando la imagen
+                pass
+                
+    except WebSocketDisconnect:
+        print("Cliente de WebSocket desconectado de Liveness")

@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Camera, CheckCircle2, UserCircle2, ArrowRight } from "lucide-react"
+import { Camera, CheckCircle2, UserCircle2, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
 import axios from "axios"
 
 export default function Login() {
@@ -11,57 +11,77 @@ export default function Login() {
     const [error, setError] = useState("")
     const [step, setStep] = useState<"username" | "camera" | "success">("username")
     const [userName, setUserName] = useState("")
+    const [livenessMessage, setLivenessMessage] = useState("Iniciando conexión segura...")
 
     const videoRef = useRef<HTMLVideoElement>(null)
-    const [stream, setStream] = useState<MediaStream | null>(null)
+    const canvasRef = useRef<HTMLCanvasElement>(null)
+    const wsRef = useRef<WebSocket | null>(null)
+    const streamRef = useRef<MediaStream | null>(null)
+    const intervalRef = useRef<number | null>(null)
+
+    const stopCameraAndSocket = useCallback(() => {
+        if (intervalRef.current) {
+            window.clearInterval(intervalRef.current)
+            intervalRef.current = null
+        }
+        if (wsRef.current) {
+            wsRef.current.close()
+            wsRef.current = null
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+        }
+    }, [])
+
+    useEffect(() => {
+        return () => {
+            stopCameraAndSocket()
+        }
+    }, [stopCameraAndSocket])
 
     const startCamera = async () => {
         try {
-            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true })
-            setStream(mediaStream)
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+            streamRef.current = mediaStream
             setStep("camera")
+            setLivenessMessage("Conectando con motor Anti-Spoofing...")
         } catch (err) {
             setError("No se pudo acceder a la cámara. Revisa los permisos.")
         }
     }
 
-    const stopCamera = () => {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop())
-            setStream(null)
-        }
-    }
+    // Capture and send frame
+    const sendFrame = useCallback(() => {
+        if (!videoRef.current || !canvasRef.current || !wsRef.current) return
+        if (wsRef.current.readyState !== WebSocket.OPEN) return
 
-    // Assign stream to video element when it becomes available
-    useEffect(() => {
-        if (step === "camera" && videoRef.current && stream) {
-            videoRef.current.srcObject = stream
-        }
-    }, [step, stream])
+        const video = videoRef.current
+        const canvas = canvasRef.current
+        const ctx = canvas.getContext("2d")
 
-    const handleAuthenticate = async () => {
-        if (!videoRef.current) return
+        if (!ctx || video.videoWidth === 0) return
 
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+        // JPEG compression to save bandwidth
+        const rawBase64Image = canvas.toDataURL("image/jpeg", 0.7)
+        // Remove the data URL prefix so python can decode it directly
+        const base64Image = rawBase64Image.replace(/^data:image\/[a-z]+;base64,/, "")
+
+        wsRef.current.send(JSON.stringify({ image_base64: base64Image }))
+    }, [])
+
+    const handleAuthenticate = async (finalImageBase64: string) => {
         setLoading(true)
         setError("")
-
-        // Capture image
-        const video = videoRef.current
-        const width = video.videoWidth || video.clientWidth || 640
-        const height = video.videoHeight || video.clientHeight || 480
-
-        const canvas = document.createElement("canvas")
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext("2d")
-        if (!ctx) return
-
-        ctx.drawImage(video, 0, 0, width, height)
-        const base64Image = canvas.toDataURL("image/jpeg")
+        setLivenessMessage("Identificando usuario en Blockchain...")
 
         try {
             const response = await axios.post("http://127.0.0.1:8000/api/v1/authenticate", {
-                image_base64: base64Image
+                image_base64: finalImageBase64
             })
 
             if (response.data.success) {
@@ -71,46 +91,113 @@ export default function Login() {
                 localStorage.setItem("role", response.data.role || "")
 
                 setUserName(response.data.user_name || "Usuario verificado")
-                stopCamera()
+                stopCameraAndSocket()
                 setStep("success")
                 setTimeout(() => {
                     navigate("/dashboard")
                 }, 2000)
             } else {
                 setError(response.data.message || "Autenticación fallida")
+                setLivenessMessage("Reintentando...")
+                // Restart liveness tracking
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    intervalRef.current = window.setInterval(sendFrame, 100)
+                }
             }
         } catch (err: any) {
             setError(err.response?.data?.detail || "Error al conectar con el servidor")
+            setLivenessMessage("Ocurrió un error. Reintentando...")
+            // Restart liveness tracking after a short delay
+            setTimeout(() => {
+                setError("")
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    setLivenessMessage("Analizando... Por favor, mira fijamente y parpadea.")
+                    intervalRef.current = window.setInterval(sendFrame, 100)
+                }
+            }, 2500)
         } finally {
             setLoading(false)
         }
     }
 
+    // Initialize WebRTC and WebSocket
+    useEffect(() => {
+        if (step === "camera" && videoRef.current && streamRef.current) {
+            videoRef.current.srcObject = streamRef.current
+
+            // Connect to WebSocket
+            const wsUrl = "ws://127.0.0.1:8000/api/v1/ws/liveness"
+            const ws = new WebSocket(wsUrl)
+            wsRef.current = ws
+
+            ws.onopen = () => {
+                setLivenessMessage("Analizando... Por favor, mira fijamente y parpadea.")
+                // Send frame 10 times per second
+                intervalRef.current = window.setInterval(sendFrame, 100)
+            }
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data)
+
+                if (data.status === "passed") {
+                    // Liveness passed! Stop streaming and capture HD frame for Auth
+                    if (intervalRef.current) clearInterval(intervalRef.current)
+                    setLivenessMessage(data.message)
+
+                    // Capture high quality frame
+                    const canvas = canvasRef.current
+                    if (canvas && videoRef.current) {
+                        const ctx = canvas.getContext("2d")
+                        canvas.width = videoRef.current.videoWidth
+                        canvas.height = videoRef.current.videoHeight
+                        ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
+                        const capture = canvas.toDataURL("image/jpeg", 0.95)
+
+                        handleAuthenticate(capture)
+                    }
+                } else if (data.status === "tracking" || data.status === "no_face") {
+                    setLivenessMessage(data.message)
+                } else if (data.status === "error") {
+                    setError("Error del servidor: " + data.message)
+                }
+            }
+
+            ws.onerror = () => {
+                setError("No se pudo conectar al motor de liveness.")
+                setLivenessMessage("Error de conexión WS")
+            }
+        }
+    }, [step, sendFrame])
+
     return (
         <div className="flex h-screen w-full items-center justify-center bg-muted/40 p-4">
+            {/* Canvas en memoria usado para extraer los frames */}
+            <canvas ref={canvasRef} style={{ display: "none" }} />
+
             <div className="absolute top-4 right-4">
                 <Button variant="ghost" onClick={() => navigate("/signup")}>
                     Registrarse <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
             </div>
 
-            <Card className="w-full max-w-md shadow-lg border-primary/10">
+            <Card className="w-full max-w-md shadow-lg border-primary/10 transition-all duration-300">
                 <CardHeader className="space-y-1 text-center">
                     <div className="flex justify-center mb-4">
                         <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                            <UserCircle2 className="h-8 w-8" />
+                            {step === "success" ? <ShieldCheck className="h-8 w-8" /> : <UserCircle2 className="h-8 w-8" />}
                         </div>
                     </div>
                     <CardTitle className="text-2xl font-bold tracking-tight">Acceso a FaceSentinel</CardTitle>
                     <CardDescription>
                         {step === "username" && "Inicia sesión con tu rostro para entrar"}
-                        {step === "camera" && "Mira a la cámara para autenticarte"}
+                        {step === "camera" && "Prueba de Vida Activa Requerida"}
                         {step === "success" && "¡Identidad verificada!"}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     {error && (
-                        <div className="mb-4 p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium text-center">
+                        <div className="mb-4 p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium text-center flex items-center justify-center gap-2">
+                            <AlertCircle className="h-4 w-4" />
                             {error}
                         </div>
                     )}
@@ -120,10 +207,10 @@ export default function Login() {
                             <div className="rounded-lg border bg-card p-4 flex flex-col items-center justify-center text-center space-y-3">
                                 <Camera className="h-10 w-10 text-muted-foreground" />
                                 <p className="text-sm text-muted-foreground">
-                                    Nuestro sistema utiliza reconocimiento facial de grado industrial con inmutabilidad en blockchain.
+                                    Nuestro sistema utiliza reconocimiento facial con prueba activa de vida e inmutabilidad en blockchain.
                                 </p>
                                 <Button className="w-full mt-2" size="lg" onClick={startCamera}>
-                                    Iniciar Escáner Facial
+                                    Iniciar Escáner Activo
                                 </Button>
                             </div>
                         </div>
@@ -131,34 +218,43 @@ export default function Login() {
 
                     {step === "camera" && (
                         <div className="space-y-4 flex flex-col items-center">
-                            <div className="relative overflow-hidden rounded-lg border-4 border-primary/20 bg-black aspect-video w-full flex items-center justify-center">
+                            <div className="relative overflow-hidden rounded-lg border-4 border-primary/20 bg-black w-full aspect-video flex items-center justify-center">
                                 <video
                                     ref={videoRef}
                                     autoPlay
                                     playsInline
                                     muted
-                                    className="h-full w-full object-cover"
+                                    className="h-full w-full object-cover transform scale-x-[-1]"
                                 />
 
-                                {/* Animación de escaneo simulada */}
-                                <div className="absolute top-0 w-full h-1 bg-primary/80 shadow-[0_0_10px_2px_rgba(59,130,246,0.6)] animate-[scan_2s_ease-in-out_infinite]" />
+                                {/* Guía Visual */}
+                                <div className="absolute inset-0 border-2 border-dashed border-primary/30 m-8 rounded-full pointer-events-none opacity-50" />
+
+                                {/* Overlay de estado */}
+                                {loading && (
+                                    <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-sm">
+                                        <div className="flex flex-col items-center space-y-2">
+                                            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+                                            <p className="text-sm font-medium">Procesando Identidad...</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="w-full flex gap-2">
+                            <div className="w-full text-center p-3 rounded-lg bg-secondary/50 border border-border">
+                                <p className="text-sm font-medium animate-pulse text-foreground">
+                                    {livenessMessage}
+                                </p>
+                            </div>
+
+                            <div className="w-full">
                                 <Button
                                     variant="outline"
                                     className="w-full"
-                                    onClick={() => { stopCamera(); setStep("username"); setError(""); }}
+                                    onClick={() => { stopCameraAndSocket(); setStep("username"); setError(""); }}
                                     disabled={loading}
                                 >
                                     Cancelar
-                                </Button>
-                                <Button
-                                    className="w-full"
-                                    onClick={handleAuthenticate}
-                                    disabled={loading}
-                                >
-                                    {loading ? "Verificando..." : "Autenticar"}
                                 </Button>
                             </div>
                         </div>
@@ -180,14 +276,6 @@ export default function Login() {
                     )}
                 </CardContent>
             </Card>
-
-            <style>{`
-        @keyframes scan {
-          0% { top: 0; }
-          50% { top: 100%; }
-          100% { top: 0; }
-        }
-      `}</style>
         </div>
     )
 }

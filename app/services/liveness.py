@@ -88,6 +88,42 @@ def analyze_blink(frame_rgb) -> tuple:
 # Alias de compatibilidad con el código existente
 analyze_face_liveness = analyze_blink
 
+class BlinkTracker:
+    """
+    Rastrea el historial de EAR (Eye Aspect Ratio) a través de múltiples frames
+    para detectar un parpadeo completo (cerrar y abrir los ojos).
+    """
+    def __init__(self, ear_threshold=0.20, consecutive_frames=2):
+        self.ear_threshold = ear_threshold
+        self.consecutive_frames = consecutive_frames
+        self.frame_counter = 0
+        self.blink_detected = False
+        self.history = []
+
+    def update(self, ear: float) -> bool:
+        """
+        Actualiza el estado con el nuevo EAR. Retorna True si se acaba de completar un parpadeo.
+        """
+        self.history.append(ear)
+        if len(self.history) > 10:
+            self.history.pop(0)
+
+        # Lógica de detección: si el EAR cae por debajo del umbral por N frames
+        if ear < self.ear_threshold:
+            self.frame_counter += 1
+        else:
+            # Si el ojo volvió a abrirse y había estado cerrado lo suficiente, es un parpadeo
+            if self.frame_counter >= self.consecutive_frames:
+                self.blink_detected = True
+            self.frame_counter = 0
+            
+        return self.blink_detected
+
+    def reset(self):
+        self.frame_counter = 0
+        self.blink_detected = False
+        self.history.clear()
+
 
 # =========================================================================
 #          MÓDULO 2: ANÁLISIS DE TEXTURA (LBP - Local Binary Patterns)
