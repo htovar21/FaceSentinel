@@ -186,11 +186,30 @@ async def websocket_liveness(websocket: WebSocket):
                     texture_res = analyze_texture(img_bgr)
                     freq_res = analyze_frequency(img_bgr)
                     
+                    metrics_payload = {
+                        "blink": {
+                            "value": round(ear, 3),
+                            "threshold": "< 0.16",
+                            "weight": "Filtro Base (Obligatorio)"
+                        },
+                        "texture": {
+                            "value": texture_res.get("entropy"),
+                            "threshold": ">= 4.75",
+                            "weight": "Determinante (Alto)"
+                        },
+                        "frequency": {
+                            "value": freq_res.get("freq_ratio"),
+                            "threshold": "N/A",
+                            "weight": "Bypass (Deshabilitado para OLED)"
+                        }
+                    }
+
                     if texture_res.get("is_real") and freq_res.get("is_real"):
                         print(f"✅ Blink real. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
                         await websocket.send_json({
                             "status": "passed", 
-                            "message": "¡Prueba de vida superada! Analizando identidad..."
+                            "message": "¡Prueba de vida superada! Analizando identidad...",
+                            "metrics": metrics_payload
                         })
                         # Romper el ciclo para no enviar múltiples señales de éxito 
                         # que causen una condición de carrera en el Frontend / Blockchain
@@ -202,7 +221,8 @@ async def websocket_liveness(websocket: WebSocket):
                         tracker.reset()
                         await websocket.send_json({
                             "status": "spoof_detected", 
-                            "message": "Ataque detectado (Pantalla/Foto). Usa un rostro real."
+                            "message": "Ataque detectado (Pantalla/Foto). Usa un rostro real.",
+                            "metrics": metrics_payload
                         })
                 else:
                     await websocket.send_json({

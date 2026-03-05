@@ -12,6 +12,8 @@ export default function Login() {
     const [step, setStep] = useState<"username" | "camera" | "success">("username")
     const [userName, setUserName] = useState("")
     const [livenessMessage, setLivenessMessage] = useState("Iniciando conexión segura...")
+    const [livenessMetrics, setLivenessMetrics] = useState<any>(null)
+    const [authDistance, setAuthDistance] = useState<number | null>(null)
 
     const videoRef = useRef<HTMLVideoElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -45,6 +47,9 @@ export default function Login() {
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
             streamRef.current = mediaStream
             setStep("camera")
+            setLivenessMetrics(null)
+            setAuthDistance(null)
+            setError("")
             setLivenessMessage("Conectando con motor Anti-Spoofing...")
         } catch (err) {
             setError("No se pudo acceder a la cámara. Revisa los permisos.")
@@ -86,6 +91,7 @@ export default function Login() {
 
             if (response.data.success) {
                 // Store session details
+                setAuthDistance(response.data.match_score)
                 localStorage.setItem("user_id", response.data.user_id || "")
                 localStorage.setItem("user_name", response.data.user_name || "Usuario verificado")
                 localStorage.setItem("role", response.data.role || "")
@@ -143,6 +149,7 @@ export default function Login() {
                     // Liveness passed! Stop streaming and capture HD frame for Auth
                     if (intervalRef.current) clearInterval(intervalRef.current)
                     setLivenessMessage(data.message)
+                    setLivenessMetrics(data.metrics)
 
                     // Capture high quality frame
                     const canvas = canvasRef.current
@@ -160,6 +167,7 @@ export default function Login() {
                     if (intervalRef.current) clearInterval(intervalRef.current)
                     setError(data.message)
                     setLivenessMessage("Bloqueo de seguridad activado.")
+                    setLivenessMetrics(data.metrics)
 
                     // Resume tracking after 3 seconds
                     setTimeout(() => {
@@ -286,6 +294,49 @@ export default function Login() {
                             <p className="text-sm text-center text-muted-foreground animate-pulse">
                                 Redirigiendo al panel seguro...
                             </p>
+                        </div>
+                    )}
+
+                    {livenessMetrics && (
+                        <div className="mt-6 p-4 rounded-lg bg-card border border-border shadow-sm space-y-3">
+                            <h4 className="text-sm font-semibold text-primary flex items-center gap-2">
+                                <ShieldCheck className="w-4 h-4" />
+                                Monitor de Liveness Activo
+                            </h4>
+                            <div className="space-y-2 text-xs">
+                                <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-muted/50 font-medium text-muted-foreground w-full">
+                                    <span className="col-span-1">Prueba</span>
+                                    <span className="col-span-1 text-center">Score Real</span>
+                                    <span className="col-span-1 text-center">Umbral Válido</span>
+                                    <span className="col-span-1 text-right">Peso Teórico</span>
+                                </div>
+                                <div className={`grid grid-cols-4 gap-2 items-center p-2 rounded ${livenessMetrics.blink ? 'bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400' : 'bg-destructive/10 border border-destructive/20 text-destructive'}`}>
+                                    <span className="col-span-1 font-semibold">Parpadeo (EAR)</span>
+                                    <span className="col-span-1 text-center font-mono font-medium">{Number(livenessMetrics.blink?.value)?.toFixed(3)}</span>
+                                    <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.blink?.threshold}</span>
+                                    <span className="col-span-1 text-right text-[10px] opacity-70">Pre-requisito</span>
+                                </div>
+                                <div className={`grid grid-cols-4 gap-2 items-center p-2 rounded ${livenessMetrics.texture?.value >= 4.75 ? 'bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400' : 'bg-destructive/10 border border-destructive/20 text-destructive'}`}>
+                                    <span className="col-span-1 font-semibold">Textura 3D (LBP)</span>
+                                    <span className="col-span-1 text-center font-mono font-medium">{Number(livenessMetrics.texture?.value)?.toFixed(3)}</span>
+                                    <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold}</span>
+                                    <span className="col-span-1 text-right text-[10px] opacity-70">Determinante (Fuerte)</span>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-muted/30 opacity-50">
+                                    <span className="col-span-1 font-semibold">Freq. (FFT)</span>
+                                    <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.value ? Number(livenessMetrics.frequency?.value)?.toFixed(3) : 'N/A'}</span>
+                                    <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.threshold}</span>
+                                    <span className="col-span-1 text-right text-[10px]">Omitido (OLEDs)</span>
+                                </div>
+                                {authDistance !== null && (
+                                    <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-primary/10 border border-primary/30 mt-3 pt-3">
+                                        <span className="col-span-1 font-semibold text-primary">Similitud IA</span>
+                                        <span className="col-span-1 text-center font-mono font-medium text-primary">{authDistance.toFixed(4)}</span>
+                                        <span className="col-span-1 text-center font-mono text-primary/80">&lt; 0.68</span>
+                                        <span className="col-span-1 text-right text-[10px] text-primary/70">Check Identidad</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </CardContent>
