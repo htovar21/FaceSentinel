@@ -214,15 +214,14 @@ def analyze_texture(frame_bgr) -> dict:
         energy = np.sum(hist ** 2)
 
         # Score compuesto: normalizado de 0 a 1 (1 = más probable piel real)
-        # Estos umbrales están calibrados empíricamente
+        # Adaptado para resistir la compresión JPEG de WebSockets (la cual destruye la textura fina)
         texture_score = min(1.0, max(0.0,
-            (entropy / 8.0) * 0.4 +           # Entropía alta = bueno
-            (variance * 1000) * 0.3 +          # Varianza alta = bueno
-            (1.0 - energy * 100) * 0.3         # Energía baja = bueno
+            (entropy / 8.0) * 0.6 +           # Entropía alta = bueno
+            (variance * 500) * 0.4             # Reducimos penalización de energía que daba 0.0 en webcams
         ))
 
-        # Umbral: > 0.4 se considera piel real
-        is_real = texture_score > 0.4
+        # Umbral permisivo: > 0.02 se considera piel real para evitar falsos rechazos en cámaras web
+        is_real = texture_score > 0.02
 
         return {
             "is_real": is_real,
@@ -291,10 +290,11 @@ def analyze_frequency(frame_bgr) -> dict:
         # Las imágenes reales tienen un ratio más bajo (menos ruido de alta frecuencia)
         freq_ratio = high_mean / (low_mean + 1e-7)
 
-        # Score: convertir a 0-1 (1 = más probable real)
-        freq_score = min(1.0, max(0.0, 1.0 - (freq_ratio - 0.3) * 2))
+        # Score: adaptado para webcams estándar
+        freq_score = min(1.0, max(0.0, 1.0 - (freq_ratio - 0.5) * 1.5))
 
-        is_real = freq_score > 0.35
+        # Umbral permisivo: solo rechaza si el ruido de alta frecuencia es extremo (ej. pantalla Moiré)
+        is_real = freq_score > 0.05
 
         return {
             "is_real": is_real,

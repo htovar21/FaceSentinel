@@ -125,13 +125,15 @@ def blockchain_status():
 
 import json
 import cv2
-from app.services.liveness import BlinkTracker, analyze_blink
+from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency
 
 @router.websocket("/ws/liveness")
 async def websocket_liveness(websocket: WebSocket):
     """
     Endpoint interactivo que recibe frames de video en tiempo real,
     rastrea los ojos del usuario y detecta un parpadeo genuino.
+    Además, verifica la textura y frecuencia espectral para bloquear
+    ataques con videos grabados en pantallas o mascaras impresas.
     """
     await websocket.accept()
     
@@ -140,22 +142,34 @@ async def websocket_liveness(websocket: WebSocket):
     tracker = BlinkTracker(ear_threshold=0.16, consecutive_frames=1)
     
     try:
+        frame_count = 0
         while True:
             # Esperar el frame del frontend
             data = await websocket.receive_text()
+            frame_count += 1
+            if frame_count == 1:
+                print("Primer frame de WebSocket recibido en el backend.")
+                
             payload = json.loads(data)
             base64_img = payload.get("image_base64", "")
             
             if not base64_img:
+                print("Frame vacío recibido.")
                 continue
                 
             try:
                 # Usar la utilidad rápida de conversión
+                if frame_count == 1: print("Decodificando base64...")
                 img_bgr = base64_to_image(base64_img)
+                
+                if frame_count == 1: print("Convirtiendo a RGB...")
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
                 
+                if frame_count == 1: print("Llamando a analyze_blink...")
                 # Obtener el estado básico (Presencia y EAR de los ojos)
                 has_face, ear = analyze_blink(img_rgb)
+                
+                if frame_count == 1: print("analyze_blink terminó correctamente.")
                 
                 if not has_face:
                     await websocket.send_json({
@@ -168,12 +182,28 @@ async def websocket_liveness(websocket: WebSocket):
                 is_blinking = tracker.update(ear)
                 
                 if is_blinking:
-                    # ¡Parpadeo detectado con éxito!
-                    await websocket.send_json({
-                        "status": "passed", 
-                        "message": "¡Prueba de vida superada! Analizando identidad..."
-                    })
-                    # Romper el ciclo o dejar que el cliente cierre la conexión
+                    # ¡Parpadeo detectado! Ahora verificamos si es una pantalla/impresión
+                    texture_res = analyze_texture(img_bgr)
+                    freq_res = analyze_frequency(img_bgr)
+                    
+                    if texture_res.get("is_real") and freq_res.get("is_real"):
+                        print(f"✅ Blink real. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
+                        await websocket.send_json({
+                            "status": "passed", 
+                            "message": "¡Prueba de vida superada! Analizando identidad..."
+                        })
+                        # Romper el ciclo para no enviar múltiples señales de éxito 
+                        # que causen una condición de carrera en el Frontend / Blockchain
+                        break
+                    else:
+                        print(f"🚨 Spoofing detectado en blink. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
+                        # Detectamos pantalla o impresión (Spoofing)
+                        # Reiniciamos el rastreador para que intente de nuevo
+                        tracker.reset()
+                        await websocket.send_json({
+                            "status": "spoof_detected", 
+                            "message": "Ataque detectado (Pantalla/Foto). Usa un rostro real."
+                        })
                 else:
                     await websocket.send_json({
                         "status": "tracking", 
@@ -182,8 +212,9 @@ async def websocket_liveness(websocket: WebSocket):
                     })
                     
             except ValueError as e:
-                # Error decodificando la imagen
-                pass
+                print(f"Error decodificando imagen en WebSocket: {e}")
                 
     except WebSocketDisconnect:
         print("Cliente de WebSocket desconectado de Liveness")
+    except Exception as e:
+        print(f"Excepción inesperada en WebSocket: {e}")

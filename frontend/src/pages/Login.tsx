@@ -155,6 +155,20 @@ export default function Login() {
 
                         handleAuthenticate(capture)
                     }
+                } else if (data.status === "spoof_detected") {
+                    // Stop tracking momentarily so user can read the warning
+                    if (intervalRef.current) clearInterval(intervalRef.current)
+                    setError(data.message)
+                    setLivenessMessage("Bloqueo de seguridad activado.")
+
+                    // Resume tracking after 3 seconds
+                    setTimeout(() => {
+                        setError("")
+                        setLivenessMessage("Analizando... Por favor, mira fijamente y parpadea.")
+                        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                            intervalRef.current = window.setInterval(sendFrame, 100)
+                        }
+                    }, 3000)
                 } else if (data.status === "tracking" || data.status === "no_face") {
                     setLivenessMessage(data.message)
                 } else if (data.status === "error") {
