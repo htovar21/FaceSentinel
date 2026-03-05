@@ -100,7 +100,7 @@ export default function Login() {
                 stopCameraAndSocket()
                 setStep("success")
                 setTimeout(() => {
-                    navigate("/dashboard")
+                    // navigate("/dashboard") // Redirección automática eliminada para permitir revisión de métricas
                 }, 2000)
             } else {
                 setError(response.data.message || "Autenticación fallida")
@@ -300,9 +300,14 @@ export default function Login() {
                                     <h3 className="text-xl font-semibold">¡Bienvenido!</h3>
                                     <p className="text-muted-foreground">{userName}</p>
                                 </div>
-                                <p className="text-sm text-center text-muted-foreground animate-pulse">
-                                    Redirigiendo al panel seguro...
-                                </p>
+                                <div className="mt-4 pt-2 w-full max-w-xs mx-auto text-center space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                    <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => navigate("/dashboard")}>
+                                        Ir al Dashboard <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                                    </Button>
+                                    <Button variant="outline" size="lg" className="w-full" onClick={() => { setStep("username"); setError(""); }}>
+                                        Realizar nueva prueba de Liveness
+                                    </Button>
+                                </div>
                             </div>
                         )}
                     </div>
