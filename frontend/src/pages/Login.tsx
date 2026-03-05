@@ -202,8 +202,8 @@ export default function Login() {
                 </Button>
             </div>
 
-            <Card className="w-full max-w-md shadow-lg border-primary/10 transition-all duration-300">
-                <CardHeader className="space-y-1 text-center">
+            <Card className={`w-full ${step !== "username" ? "max-w-4xl" : "max-w-md"} shadow-lg border-primary/10 transition-all duration-300`}>
+                <CardHeader className="space-y-1 text-center md:col-span-full">
                     <div className="flex justify-center mb-4">
                         <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                             {step === "success" ? <ShieldCheck className="h-8 w-8" /> : <UserCircle2 className="h-8 w-8" />}
@@ -216,16 +216,26 @@ export default function Login() {
                         {step === "success" && "¡Identidad verificada!"}
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
-                    {error && (
+
+                <CardContent className={`${step !== "username" ? "md:grid md:grid-cols-2 md:gap-6 items-start" : ""}`}>
+                    {/* Mensaje global de error */}
+                    {error && step === "username" && (
                         <div className="mb-4 p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium text-center flex items-center justify-center gap-2">
                             <AlertCircle className="h-4 w-4" />
                             {error}
                         </div>
                     )}
 
-                    {step === "username" && (
-                        <div className="space-y-4">
+                    {/* Columna Izquierda: Input / Cámara */}
+                    <div className="w-full flex flex-col space-y-4">
+                        {error && step !== "username" && (
+                            <div className="p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium text-center flex items-center justify-center gap-2">
+                                <AlertCircle className="h-4 w-4" />
+                                {error}
+                            </div>
+                        )}
+
+                        {step === "username" && (
                             <div className="rounded-lg border bg-card p-4 flex flex-col items-center justify-center text-center space-y-3">
                                 <Camera className="h-10 w-10 text-muted-foreground" />
                                 <p className="text-sm text-muted-foreground">
@@ -235,105 +245,126 @@ export default function Login() {
                                     Iniciar Escáner Activo
                                 </Button>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {step === "camera" && (
-                        <div className="space-y-4 flex flex-col items-center">
-                            <div className="relative overflow-hidden rounded-lg border-4 border-primary/20 bg-black w-full aspect-video flex items-center justify-center">
-                                <video
-                                    ref={videoRef}
-                                    autoPlay
-                                    playsInline
-                                    muted
-                                    className="h-full w-full object-cover transform scale-x-[-1]"
-                                />
+                        {step === "camera" && (
+                            <div className="space-y-4 flex flex-col items-center">
+                                <div className="relative overflow-hidden rounded-lg border-4 border-primary/20 bg-black w-full aspect-video flex items-center justify-center shadow-inner">
+                                    <video
+                                        ref={videoRef}
+                                        autoPlay
+                                        playsInline
+                                        muted
+                                        className="h-full w-full object-cover transform scale-x-[-1]"
+                                    />
 
-                                {/* Guía Visual */}
-                                <div className="absolute inset-0 border-2 border-dashed border-primary/30 m-8 rounded-full pointer-events-none opacity-50" />
+                                    {/* Guía Visual */}
+                                    <div className="absolute inset-0 border-2 border-dashed border-primary/30 m-8 rounded-full pointer-events-none opacity-50" />
 
-                                {/* Overlay de estado */}
-                                {loading && (
-                                    <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-sm">
-                                        <div className="flex flex-col items-center space-y-2">
-                                            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-                                            <p className="text-sm font-medium">Procesando Identidad...</p>
+                                    {/* Overlay de procesamiento */}
+                                    {loading && (
+                                        <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-sm">
+                                            <div className="flex flex-col items-center space-y-2">
+                                                <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+                                                <p className="text-sm font-medium">Procesando Identidad...</p>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
+                                    )}
+                                </div>
 
-                            <div className="w-full text-center p-3 rounded-lg bg-secondary/50 border border-border">
-                                <p className="text-sm font-medium animate-pulse text-foreground">
-                                    {livenessMessage}
+                                <div className="w-full text-center p-3 rounded-lg bg-secondary/50 border border-border">
+                                    <p className="text-sm font-medium animate-pulse text-foreground">
+                                        {livenessMessage}
+                                    </p>
+                                </div>
+
+                                <div className="w-full">
+                                    <Button
+                                        variant="outline"
+                                        className="w-full"
+                                        onClick={() => { stopCameraAndSocket(); setStep("username"); setError(""); }}
+                                        disabled={loading}
+                                    >
+                                        Cancelar
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === "success" && (
+                            <div className="flex flex-col items-center justify-center py-6 space-y-4">
+                                <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
+                                    <CheckCircle2 className="h-10 w-10 text-green-600" />
+                                </div>
+                                <div className="text-center">
+                                    <h3 className="text-xl font-semibold">¡Bienvenido!</h3>
+                                    <p className="text-muted-foreground">{userName}</p>
+                                </div>
+                                <p className="text-sm text-center text-muted-foreground animate-pulse">
+                                    Redirigiendo al panel seguro...
                                 </p>
                             </div>
+                        )}
+                    </div>
 
-                            <div className="w-full">
-                                <Button
-                                    variant="outline"
-                                    className="w-full"
-                                    onClick={() => { stopCameraAndSocket(); setStep("username"); setError(""); }}
-                                    disabled={loading}
-                                >
-                                    Cancelar
-                                </Button>
-                            </div>
-                        </div>
-                    )}
+                    {/* Columna Derecha: Métricas en Vivo */}
+                    {(step === "camera" || step === "success") && (
+                        <div className="w-full h-full flex flex-col justify-start mt-6 md:mt-0">
+                            <div className="p-5 rounded-xl border border-border shadow-sm flex-1 flex flex-col items-center justify-center bg-card/50 relative overflow-hidden group">
+                                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-50" />
 
-                    {step === "success" && (
-                        <div className="flex flex-col items-center justify-center py-6 space-y-4">
-                            <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
-                                <CheckCircle2 className="h-10 w-10 text-green-600" />
-                            </div>
-                            <div className="text-center">
-                                <h3 className="text-xl font-semibold">¡Bienvenido!</h3>
-                                <p className="text-muted-foreground">{userName}</p>
-                            </div>
-                            <p className="text-sm text-center text-muted-foreground animate-pulse">
-                                Redirigiendo al panel seguro...
-                            </p>
-                        </div>
-                    )}
+                                {!livenessMetrics ? (
+                                    <div className="text-center space-y-3 z-10 w-full opacity-60">
+                                        <ShieldCheck className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
+                                        <h4 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">Monitor de Vida</h4>
+                                        <p className="text-xs text-muted-foreground max-w-[200px] mx-auto">
+                                            Esperando detección biométrica para generar métricas de Anti-Spoofing...
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="w-full space-y-4 z-10">
+                                        <h4 className="text-sm font-semibold text-primary flex items-center gap-2 border-b border-border/50 pb-2">
+                                            <ShieldCheck className="w-5 h-5" />
+                                            Monitor de Liveness Activo
+                                        </h4>
+                                        <div className="space-y-3 text-xs w-full">
+                                            <div className="grid grid-cols-4 gap-2 items-center px-2 py-1.5 rounded bg-muted/50 font-medium text-muted-foreground w-full">
+                                                <span className="col-span-1">Filtro</span>
+                                                <span className="col-span-1 text-center">Score</span>
+                                                <span className="col-span-1 text-center">Umbral</span>
+                                                <span className="col-span-1 text-right">Impacto</span>
+                                            </div>
 
-                    {livenessMetrics && (
-                        <div className="mt-6 p-4 rounded-lg bg-card border border-border shadow-sm space-y-3">
-                            <h4 className="text-sm font-semibold text-primary flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4" />
-                                Monitor de Liveness Activo
-                            </h4>
-                            <div className="space-y-2 text-xs">
-                                <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-muted/50 font-medium text-muted-foreground w-full">
-                                    <span className="col-span-1">Prueba</span>
-                                    <span className="col-span-1 text-center">Score Real</span>
-                                    <span className="col-span-1 text-center">Umbral Válido</span>
-                                    <span className="col-span-1 text-right">Peso Teórico</span>
-                                </div>
-                                <div className={`grid grid-cols-4 gap-2 items-center p-2 rounded ${livenessMetrics.blink ? 'bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400' : 'bg-destructive/10 border border-destructive/20 text-destructive'}`}>
-                                    <span className="col-span-1 font-semibold">Parpadeo (EAR)</span>
-                                    <span className="col-span-1 text-center font-mono font-medium">{Number(livenessMetrics.blink?.value)?.toFixed(3)}</span>
-                                    <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.blink?.threshold}</span>
-                                    <span className="col-span-1 text-right text-[10px] opacity-70">Pre-requisito</span>
-                                </div>
-                                <div className={`grid grid-cols-4 gap-2 items-center p-2 rounded ${livenessMetrics.texture?.value >= 4.75 ? 'bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400' : 'bg-destructive/10 border border-destructive/20 text-destructive'}`}>
-                                    <span className="col-span-1 font-semibold">Textura 3D (LBP)</span>
-                                    <span className="col-span-1 text-center font-mono font-medium">{Number(livenessMetrics.texture?.value)?.toFixed(3)}</span>
-                                    <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold}</span>
-                                    <span className="col-span-1 text-right text-[10px] opacity-70">Determinante (Fuerte)</span>
-                                </div>
-                                <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-muted/30 opacity-50">
-                                    <span className="col-span-1 font-semibold">Freq. (FFT)</span>
-                                    <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.value ? Number(livenessMetrics.frequency?.value)?.toFixed(3) : 'N/A'}</span>
-                                    <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.threshold}</span>
-                                    <span className="col-span-1 text-right text-[10px]">Omitido (OLEDs)</span>
-                                </div>
-                                {authDistance !== null && (
-                                    <div className="grid grid-cols-4 gap-2 items-center p-2 rounded bg-primary/10 border border-primary/30 mt-3 pt-3">
-                                        <span className="col-span-1 font-semibold text-primary">Similitud IA</span>
-                                        <span className="col-span-1 text-center font-mono font-medium text-primary">{authDistance.toFixed(4)}</span>
-                                        <span className="col-span-1 text-center font-mono text-primary/80">&lt; 0.68</span>
-                                        <span className="col-span-1 text-right text-[10px] text-primary/70">Check Identidad</span>
+                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.blink ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
+                                                <span className="col-span-1 font-semibold flex items-center gap-1">EAR</span>
+                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">{Number(livenessMetrics.blink?.value)?.toFixed(3)}</span>
+                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.blink?.threshold}</span>
+                                                <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Pre-req<br />Biométrico</span>
+                                            </div>
+
+                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.texture?.value >= 4.75 ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
+                                                <span className="col-span-1 font-semibold flex items-center gap-1">LBP</span>
+                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">{Number(livenessMetrics.texture?.value)?.toFixed(3)}</span>
+                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold}</span>
+                                                <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Densidad<br />Textura 3D</span>
+                                            </div>
+
+                                            <div className="grid grid-cols-4 gap-2 items-center p-3 rounded-md bg-muted/30 border-l-4 border-muted-foreground/30 opacity-60">
+                                                <span className="col-span-1 font-semibold flex items-center gap-1">FFT</span>
+                                                <span className="col-span-1 text-center font-mono text-sm tracking-tight">{livenessMetrics.frequency?.value ? Number(livenessMetrics.frequency?.value)?.toFixed(3) : 'N/A'}</span>
+                                                <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.threshold}</span>
+                                                <span className="col-span-1 text-right text-[10px] leading-tight">Bypass<br />(OLEDs)</span>
+                                            </div>
+
+                                            {authDistance !== null && (
+                                                <div className="grid grid-cols-4 gap-2 items-center p-3 rounded-md bg-primary/10 border-l-4 border-primary mt-4 pt-3 shadow-sm transform scale-105 origin-left transition-all">
+                                                    <span className="col-span-1 font-bold text-primary">ArcFace</span>
+                                                    <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]">{authDistance.toFixed(4)}</span>
+                                                    <span className="col-span-1 text-center font-mono text-primary/80 font-medium">&lt; 0.68</span>
+                                                    <span className="col-span-1 text-right text-[10px] font-bold text-primary/90 leading-tight">Match<br />Identidad</span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
