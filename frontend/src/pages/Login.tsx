@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Camera, CheckCircle2, UserCircle2, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
@@ -7,6 +7,13 @@ import axios from "axios"
 
 export default function Login() {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
+
+    // Extract query parameters for federated login
+    const clientId = searchParams.get("client_id")
+    const redirectUri = searchParams.get("redirect_uri")
+    const appName = searchParams.get("app_name")
+
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState("")
     const [step, setStep] = useState<"username" | "camera" | "success">("username")
@@ -14,6 +21,7 @@ export default function Login() {
     const [livenessMessage, setLivenessMessage] = useState("Iniciando conexión segura...")
     const [livenessMetrics, setLivenessMetrics] = useState<any>(null)
     const [authDistance, setAuthDistance] = useState<number | null>(null)
+    const [idpToken, setIdpToken] = useState<string>("")
 
     const videoRef = useRef<HTMLVideoElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -86,7 +94,8 @@ export default function Login() {
 
         try {
             const response = await axios.post("http://127.0.0.1:8000/api/v1/authenticate", {
-                image_base64: finalImageBase64
+                image_base64: finalImageBase64,
+                client_id: clientId || undefined
             })
 
             if (response.data.success) {
@@ -97,10 +106,36 @@ export default function Login() {
                 localStorage.setItem("role", response.data.role || "")
 
                 setUserName(response.data.user_name || "Usuario verificado")
+                
+                // Get the token from response (reject if missing for federated flow)
+                const token = response.data.token || response.data.idp_token
+
+                if (redirectUri && !token) {
+                    setError("Error fatal: No se emitió token de federación")
+                    setLivenessMessage("Error de seguridad")
+                    stopCameraAndSocket()
+                    return
+                }
+
+                if (token) {
+                    setIdpToken(token)
+                }
+
                 stopCameraAndSocket()
                 setStep("success")
+                
                 setTimeout(() => {
-                    // navigate("/dashboard") // Redirección automática eliminada para permitir revisión de métricas
+                    if (redirectUri && token) {
+                        try {
+                            const url = new URL(redirectUri)
+                            url.searchParams.append("token", token)
+                            window.location.href = url.toString()
+                        } catch (urlErr) {
+                            setError("Error al construir la URL de redirección")
+                        }
+                    } else {
+                        navigate("/dashboard")
+                    }
                 }, 2000)
             } else {
                 setError(response.data.message || "Autenticación fallida")
@@ -209,9 +244,11 @@ export default function Login() {
                             {step === "success" ? <ShieldCheck className="h-8 w-8" /> : <UserCircle2 className="h-8 w-8" />}
                         </div>
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight">Acceso a FaceSentinel</CardTitle>
+                    <CardTitle className="text-2xl font-bold tracking-tight">
+                        {appName ? `Iniciar sesión en ${appName}` : "Acceso a FaceSentinel"}
+                    </CardTitle>
                     <CardDescription>
-                        {step === "username" && "Inicia sesión con tu rostro para entrar"}
+                        {step === "username" && (appName ? `Iniciando sesión segura en ${appName} con FaceSentinel` : "Inicia sesión con tu rostro para entrar")}
                         {step === "camera" && "Prueba de Vida Activa Requerida"}
                         {step === "success" && "¡Identidad verificada!"}
                     </CardDescription>
@@ -301,9 +338,23 @@ export default function Login() {
                                     <p className="text-muted-foreground">{userName}</p>
                                 </div>
                                 <div className="mt-4 pt-2 w-full max-w-xs mx-auto text-center space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                    <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => navigate("/dashboard")}>
-                                        Ir al Dashboard <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                                    </Button>
+                                    {redirectUri ? (
+                                        <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => { 
+                                            try {
+                                                const url = new URL(redirectUri)
+                                                url.searchParams.append("token", idpToken)
+                                                window.location.href = url.toString()
+                                            } catch (urlErr) {
+                                                setError("Error al construir la URL de redirección")
+                                            }
+                                        }}>
+                                            Continuar a {appName || "Aplicación"} <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                                        </Button>
+                                    ) : (
+                                        <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => navigate("/dashboard")}>
+                                            Ir al Dashboard <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                                        </Button>
+                                    )}
                                     <Button variant="outline" size="lg" className="w-full" onClick={() => { setStep("username"); setError(""); }}>
                                         Realizar nueva prueba de Liveness
                                     </Button>

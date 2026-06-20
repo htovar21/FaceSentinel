@@ -15,6 +15,7 @@ class UserRegister(BaseModel):
 # Lo que el sistema espera recibir cuando alguien intenta entrar
 class AuthRequest(BaseModel):
     image_base64: str
+    client_id: Optional[str] = None
 
 # Lo que tu sistema le responderá al Frontend o a la puerta
 class AuthResponse(BaseModel):
@@ -25,6 +26,7 @@ class AuthResponse(BaseModel):
     role: Optional[str] = None      
     match_score: Optional[float] = None
     tx_hash: Optional[str] = None  # El recibo de la Blockchain
+    token: Optional[str] = None    # Token federado o de acceso
 
 
 # =========================================================================
