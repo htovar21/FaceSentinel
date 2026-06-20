@@ -82,57 +82,13 @@ def register_user(user_data: UserRegister):
 @router.post("/authenticate", response_model=AuthResponse, tags=["Autenticación y Registro"])
 def authenticate_user(auth_data: AuthRequest):
     """
-    Recibe una foto de la cámara en vivo, busca quién es en ChromaDB,
-    y registra el evento de autenticación en la blockchain.
+    [DEPRECADO] Endpoint vulnerable a API Bypass.
+    La autenticación biométrica ahora es Zero-Trust y debe realizarse exclusivamente
+    a través del WebSocket interactivo en /ws/liveness.
     """
-    # 1. Validación inmediata del cliente de terceros (si viene client_id)
-    if auth_data.client_id:
-        client = get_oauth_client(auth_data.client_id)
-        if not client:
-            raise HTTPException(
-                status_code=403, 
-                detail="Aplicación cliente no autorizada o no registrada"
-            )
-
-    result = verify_face(auth_data.image_base64)
-    
-    if not result["success"]:
-        # Registrar intento fallido en blockchain (si está disponible)
-        bc_result = log_authentication(
-            user_id="DESCONOCIDO",
-            access_granted=False,
-            device_id="API-SERVER-01",
-            match_score=0.0,
-        )
-
-        raise HTTPException(status_code=401, detail=result["message"])
-    
-    # Registrar acceso exitoso en la blockchain
-    bc_result = log_authentication(
-        user_id=result.get("user_id", ""),
-        access_granted=True,
-        device_id="API-SERVER-01",
-        match_score=result.get("distance", 0.0),
-    )
-
-    # 2. Bifurcación del Token según el tipo de flujo
-    token = None
-    if auth_data.client_id:
-        token = generate_idp_token(result.get("user_id", ""), auth_data.client_id)
-    else:
-        token = create_access_token(
-            data={"sub": result.get("user_id", ""), "role": result.get("role", "user")}
-        )
-
-    return AuthResponse(
-        success=True,
-        message=result["message"],
-        user_id=result.get("user_id"),
-        user_name=result["name"],
-        role=result.get("role"),
-        match_score=result["distance"],
-        tx_hash=bc_result.get("tx_hash"),
-        token=token,
+    raise HTTPException(
+        status_code=410,
+        detail="Endpoint deprecado. La autenticación biométrica ahora es Zero-Trust y debe realizarse exclusivamente a través de la conexión interactiva en /ws/liveness"
     )
 
 

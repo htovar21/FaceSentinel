@@ -93,11 +93,22 @@ def register_face(user_id: str, name: str, role: str, base64_image: str):
 #              FLUJO DE AUTENTICACIÓN (MATCHING)
 # =========================================================================
 
-def verify_face(base64_image: str):
-    """Convierte la foto de la cámara en vector y busca el más parecido en la DB."""
+def verify_face(image_data):
+    """Convierte la foto de la cámara (o usa el numpy array directamente) en vector y busca el más parecido en la DB."""
     logger.info("🔍 Iniciando verificación facial...")
 
-    img = base64_to_image(base64_image)
+    if isinstance(image_data, str):
+        try:
+            img = base64_to_image(image_data)
+        except Exception as e:
+            logger.warning(f"Error decodificando imagen base64: {e}")
+            return {"success": False, "message": f"Error decodificando imagen: {e}"}
+    elif isinstance(image_data, np.ndarray):
+        img = image_data
+    else:
+        logger.error(f"Formato de imagen inválido: {type(image_data)}")
+        return {"success": False, "message": "Formato de imagen inválido"}
+
     embedding = get_embedding(img)
 
     if not embedding:
