@@ -18,6 +18,7 @@ from app.services.face_recognition import register_face, verify_face, remove_fac
 from app.services.blockchain import (
     log_authentication,
     get_auth_history,
+    get_recent_records_by_client,
     get_contract_info,
     is_blockchain_available,
 )
@@ -113,7 +114,7 @@ def delete_user_account(user_id: str):
 @router.get("/auth-history/{user_id}", tags=["Blockchain"])
 def get_user_auth_history(
     user_id: str,
-    count: int = Query(default=10, ge=1, le=100, description="Cantidad de registros a retornar")
+    limit: int = Query(default=10, ge=1, le=100, alias="limit", description="Cantidad de registros a retornar")
 ):
     """
     Consulta el historial de autenticaciones de un usuario en la blockchain.
@@ -125,12 +126,34 @@ def get_user_auth_history(
             detail="Blockchain no disponible. Verifica que Ganache esté corriendo."
         )
     
-    history = get_auth_history(user_id, count)
+    history = get_auth_history(user_id, limit)
     
     if not history["success"]:
         raise HTTPException(status_code=500, detail=history["message"])
     
     return history
+
+
+@router.get("/clients/{client_id}/logs", tags=["Blockchain"])
+def get_client_logs(
+    client_id: str,
+    limit: int = Query(default=50, ge=1, le=100, description="Cantidad de registros a retornar")
+):
+    """
+    Obtiene los registros de autenticación asociados a un clientId específico en la blockchain.
+    """
+    if not is_blockchain_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Blockchain no disponible. Verifica que Ganache esté corriendo."
+        )
+    
+    logs = get_recent_records_by_client(client_id, limit)
+    
+    if not logs["success"]:
+        raise HTTPException(status_code=500, detail=logs["message"])
+    
+    return logs
 
 
 @router.get("/blockchain/status", response_model=BlockchainInfoResponse, tags=["Blockchain"])

@@ -22,6 +22,7 @@ contract AccessRegistry {
         bool accessGranted;      // true = acceso concedido, false = denegado
         string deviceId;         // Identificador del punto de acceso / dispositivo
         uint256 matchScore;      // Distancia coseno x10000 (4 decimales de precisión)
+        string clientId;         // Identificador de la aplicación cliente de terceros
     }
 
     // =========================================================================
@@ -43,6 +44,9 @@ contract AccessRegistry {
     /// @notice Índice: userId => lista de IDs de registros para ese usuario
     mapping(string => uint256[]) private userRecordIds;
 
+    /// @notice Índice: clientId => lista de IDs de registros para ese cliente de terceros
+    mapping(string => uint256[]) public clientRecordIds;
+
     // =========================================================================
     //                               EVENTOS
     // =========================================================================
@@ -53,7 +57,8 @@ contract AccessRegistry {
         string userId,
         bool accessGranted,
         uint256 timestamp,
-        address indexed device
+        address indexed device,
+        string clientId
     );
 
     /// @notice Se emite cuando se autoriza o revoca un dispositivo
@@ -126,6 +131,7 @@ contract AccessRegistry {
      * @param _accessGranted Si el acceso fue concedido o denegado
      * @param _deviceId Identificador del punto de acceso
      * @param _matchScore Distancia coseno x10000
+     * @param _clientId Identificador de la aplicación cliente
      * @return recordId El ID asignado al registro
      */
     function logAuthentication(
@@ -133,7 +139,8 @@ contract AccessRegistry {
         bytes32 _biometricHash,
         bool _accessGranted,
         string calldata _deviceId,
-        uint256 _matchScore
+        uint256 _matchScore,
+        string calldata _clientId
     ) external onlyAuthorized returns (uint256 recordId) {
         recordId = totalRecords;
 
@@ -143,10 +150,12 @@ contract AccessRegistry {
             timestamp: block.timestamp,
             accessGranted: _accessGranted,
             deviceId: _deviceId,
-            matchScore: _matchScore
+            matchScore: _matchScore,
+            clientId: _clientId
         });
 
         userRecordIds[_userId].push(recordId);
+        clientRecordIds[_clientId].push(recordId);
         totalRecords++;
 
         emit AuthenticationLogged(
@@ -154,7 +163,8 @@ contract AccessRegistry {
             _userId,
             _accessGranted,
             block.timestamp,
-            msg.sender
+            msg.sender,
+            _clientId
         );
 
         return recordId;
@@ -201,6 +211,30 @@ contract AccessRegistry {
 
         for (uint256 i = 0; i < resultCount; i++) {
             // Empezamos desde el final para obtener los más recientes
+            results[i] = authRecords[ids[total - 1 - i]];
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Obtiene los registros recientes de una aplicación cliente con límite de seguridad
+     * @param _clientId Identificador de la aplicación cliente
+     * @param _limit Cantidad máxima de registros a retornar
+     * @return Array de AuthRecord con los registros del cliente (más recientes primero)
+     */
+    function getRecentRecordsByClient(
+        string memory _clientId,
+        uint256 _limit
+    ) external view returns (AuthRecord[] memory) {
+        uint256[] storage ids = clientRecordIds[_clientId];
+        uint256 total = ids.length;
+        uint256 resultCount = _limit < total ? _limit : total;
+
+        AuthRecord[] memory results = new AuthRecord[](resultCount);
+
+        for (uint256 i = 0; i < resultCount; i++) {
+            // Empezamos desde el final para obtener los más recientes (orden descendente)
             results[i] = authRecords[ids[total - 1 - i]];
         }
 

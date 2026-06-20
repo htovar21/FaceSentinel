@@ -33,13 +33,15 @@ export default function Dashboard() {
             return
         }
 
+        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+
         // Verificamos conexión con el servidor
-        axios.get("http://127.0.0.1:8000/")
+        axios.get(`${baseUrl}/`)
             .then(r => setDbStatus(r.data))
             .catch(() => setDbStatus({ status: "offline", blockchain: "disconnected" }))
 
         // Cargar historial de acceso
-        axios.get(`http://127.0.0.1:8000/api/v1/auth-history/${userId}`)
+        axios.get(`${baseUrl}/api/v1/auth-history/${userId}?limit=50`)
             .then(r => {
                 if (r.data.success && r.data.records) {
                     setAuthHistory(r.data.records)

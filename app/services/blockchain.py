@@ -124,6 +124,7 @@ def _compute_biometric_hash(embedding: list) -> bytes:
 
 def log_authentication(
     user_id: str,
+    client_id: str,
     embedding: list = None,
     access_granted: bool = True,
     device_id: str = "API-SERVER-01",
@@ -134,6 +135,7 @@ def log_authentication(
 
     Args:
         user_id: Identificador del usuario autenticado
+        client_id: Identificador de la aplicación cliente (obligatorio)
         embedding: Vector facial (se hashea antes de guardar, nunca se guarda raw)
         access_granted: Si el acceso fue concedido o denegado
         device_id: Identificador del punto de acceso
@@ -165,7 +167,8 @@ def log_authentication(
             bio_hash,
             access_granted,
             device_id,
-            score_int
+            score_int,
+            client_id
         ).build_transaction({
             "chainId": actual_chain_id,
             "gasPrice": _w3.eth.gas_price,
@@ -257,6 +260,50 @@ def get_auth_history(user_id: str, count: int = 10) -> dict:
 
     except Exception as e:
         logger.error(f"Error consultando historial: {e}")
+        return {"success": False, "message": str(e), "records": []}
+
+
+def get_recent_records_by_client(client_id: str, limit: int = 50) -> dict:
+    """
+    Consulta el historial de autenticaciones de un cliente en la blockchain.
+
+    Args:
+        client_id: Identificador del cliente
+        limit: Número máximo de registros recientes a retornar
+
+    Returns:
+        dict con lista de registros o mensaje de error
+    """
+    if not is_blockchain_available():
+        return {"success": False, "message": "Blockchain no disponible", "records": []}
+
+    try:
+        # Obtener los registros más recientes de la aplicación cliente
+        records_raw = _contract.functions.getRecentRecordsByClient(client_id, limit).call()
+
+        records = []
+        for r in records_raw:
+            records.append({
+                "user_id": r[0],
+                "biometric_hash": "0x" + r[1].hex(),
+                "timestamp": r[2],
+                "access_granted": r[3],
+                "device_id": r[4],
+                "match_score": r[5] / 10000.0,  # Reconvertir a float
+                "client_id": r[6]
+            })
+
+        logger.info(f"📋 Historial consultado para cliente {client_id}: {len(records)} registros")
+
+        return {
+            "success": True,
+            "client_id": client_id,
+            "total_records": len(records),
+            "records": records,
+        }
+
+    except Exception as e:
+        logger.error(f"Error consultando historial por cliente: {e}")
         return {"success": False, "message": str(e), "records": []}
 
 
