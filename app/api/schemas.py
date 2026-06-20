@@ -59,3 +59,21 @@ class AuthHistoryResponse(BaseModel):
     user_id: str
     total_records: int
     records: List[AuthRecordResponse]
+
+
+# =========================================================================
+#                   SCHEMAS DE CLIENTES OAUTH (IdP)
+# =========================================================================
+
+class ClientCreate(BaseModel):
+    """Modelo para registrar una nueva aplicación cliente de terceros."""
+    app_name: str
+    redirect_uris: List[str]
+
+
+class ClientResponse(BaseModel):
+    """Modelo de respuesta para el registro de una aplicación cliente."""
+    client_id: str
+    client_secret: Optional[str] = None
+    app_name: str
+    redirect_uris: List[str]

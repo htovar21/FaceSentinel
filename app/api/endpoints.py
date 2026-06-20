@@ -1,5 +1,15 @@
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
-from app.api.schemas import UserRegister, AuthRequest, AuthResponse, BlockchainInfoResponse
+from app.api.schemas import (
+    UserRegister,
+    AuthRequest,
+    AuthResponse,
+    BlockchainInfoResponse,
+    ClientCreate,
+    ClientResponse,
+)
+import secrets
+from app.services.storage import save_oauth_client
+from app.core.security import hash_client_secret
 
 # Importamos las funciones reales de IA que creamos en el paso anterior
 from app.services.face_recognition import register_face, verify_face, remove_face, base64_to_image
@@ -13,6 +23,42 @@ from app.services.blockchain import (
 )
 
 router = APIRouter()
+
+@router.post("/clients/register", response_model=ClientResponse, tags=["IdP OAuth / SSO"])
+def register_oauth_client(client_data: ClientCreate):
+    """
+    Registra una nueva aplicación de terceros (cliente OAuth).
+    Genera un client_id y un client_secret aleatorios y seguros usando URL safe tokens.
+    El client_secret se devuelve en texto plano por única vez en la respuesta.
+    """
+    # Generar credenciales seguras
+    client_id = f"fs_{secrets.token_urlsafe(32)}"
+    client_secret = f"fss_{secrets.token_urlsafe(32)}"
+    
+    # Hashear el client_secret usando bcrypt de passlib
+    secret_hash = hash_client_secret(client_secret)
+    
+    # Guardar en base de datos SQLite (las URIs se guardan como JSON string en storage.py)
+    success = save_oauth_client(
+        client_id=client_id,
+        client_secret_hash=secret_hash,
+        redirect_uris=client_data.redirect_uris,
+        app_name=client_data.app_name
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo registrar el cliente en la base de datos."
+        )
+        
+    return ClientResponse(
+        client_id=client_id,
+        client_secret=client_secret,
+        app_name=client_data.app_name,
+        redirect_uris=client_data.redirect_uris
+    )
+
 
 @router.post("/register", tags=["Autenticación y Registro"])
 def register_user(user_data: UserRegister):

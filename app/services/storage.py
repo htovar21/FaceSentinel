@@ -4,8 +4,10 @@ Gestiona la persistencia de datos biométricos y metadatos de usuarios.
 """
 
 import sqlite3
+import json
 import logging
 import chromadb
+from typing import Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -70,9 +72,72 @@ def init_sqlite():
         )
     ''')
 
+    # Tabla de clientes OAuth/SSO registrados
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            client_id TEXT PRIMARY KEY,
+            client_secret_hash TEXT NOT NULL,
+            redirect_uris TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     conn.commit()
     conn.close()
     logger.info("✅ Tablas SQLite creadas/verificadas.")
+
+
+def save_oauth_client(client_id: str, client_secret_hash: str, redirect_uris: list[str], app_name: str) -> bool:
+    """
+    Guarda un nuevo cliente de OAuth en la base de datos relacional.
+    Serializa la lista de URIs de redirección como una cadena JSON.
+    """
+    conn = _get_connection()
+    cursor = conn.cursor()
+    try:
+        redirect_uris_json = json.dumps(redirect_uris)
+        cursor.execute(
+            'INSERT INTO oauth_clients (client_id, client_secret_hash, redirect_uris, app_name) VALUES (?, ?, ?, ?)',
+            (client_id, client_secret_hash, redirect_uris_json, app_name)
+        )
+        conn.commit()
+        logger.info(f"🔑 Cliente OAuth '{app_name}' (ID: {client_id}) guardado con éxito.")
+        return True
+    except sqlite3.IntegrityError as e:
+        logger.error(f"❌ Error de integridad al guardar el cliente OAuth {client_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_oauth_client(client_id: str) -> Optional[dict]:
+    """
+    Busca y retorna un cliente OAuth por su ID.
+    Deserializa las URIs de redirección desde formato JSON.
+    """
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT client_id, client_secret_hash, redirect_uris, app_name FROM oauth_clients WHERE client_id = ?',
+        (client_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        try:
+            uris = json.loads(row["redirect_uris"])
+        except (json.JSONDecodeError, TypeError):
+            uris = []
+        return {
+            "client_id": row["client_id"],
+            "client_secret_hash": row["client_secret_hash"],
+            "redirect_uris": uris,
+            "app_name": row["app_name"]
+        }
+    return None
+
 
 
 def save_user_data(user_id: str, name: str, role: str, face_vector: list):

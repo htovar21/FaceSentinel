@@ -25,6 +25,9 @@ py-solc-x>=2.0.0      # Compilador de Solidity para desplegar contratos desde Py
 # --- Seguridad ---
 PyJWT>=2.8.0          # Generación y validación de JSON Web Tokens (JWT)
 slowapi>=0.1.9        # Rate limiting para FastAPI (protección contra fuerza bruta)
+passlib[bcrypt]>=1.7.4 # Hashing de contraseñas y secrets
+bcrypt>=4.0.0
+
 
 # --- Utilidades y Entorno ---
 python-dotenv>=1.0.0  # Cargar claves privadas desde archivo .env

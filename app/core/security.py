@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
+from passlib.context import CryptContext
 
 import jwt
 
@@ -30,6 +31,9 @@ JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "60"))
 # Esquemas de seguridad para FastAPI/Swagger
 bearer_scheme = HTTPBearer(auto_error=False)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+# Configuración de Hasheo con Bcrypt
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # =========================================================================
@@ -88,6 +92,38 @@ def verify_token(token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido.",
         )
+
+
+def generate_idp_token(user_id: str, client_id: str, expires_delta_minutes: int = 3) -> str:
+    """
+    Genera un token JWT de federación (IdP) con una expiración muy corta.
+    Incluye al usuario en el claim 'sub' y al cliente de terceros en 'aud'.
+    """
+    payload = {
+        "sub": user_id,
+        "aud": client_id,
+        "iss": "facesentinel-idp",
+    }
+    return create_access_token(data=payload, expires_delta=timedelta(minutes=expires_delta_minutes))
+
+
+
+# =========================================================================
+#                      FUNCIONES OAUTH CLIENT SECRETS (Bcrypt)
+# =========================================================================
+
+def hash_client_secret(secret: str) -> str:
+    """
+    Hashea un client_secret usando passlib con el algoritmo bcrypt.
+    """
+    return pwd_context.hash(secret)
+
+
+def verify_client_secret(secret: str, hashed_secret: str) -> bool:
+    """
+    Verifica si un client_secret en texto plano coincide con su hash bcrypt.
+    """
+    return pwd_context.verify(secret, hashed_secret)
 
 
 # =========================================================================
