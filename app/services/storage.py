@@ -53,10 +53,22 @@ def init_sqlite():
             user_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             role TEXT NOT NULL,
+            password_hash TEXT,
+            associated_client_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Migración de columnas por si la tabla ya existía
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN associated_client_id TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     # Tabla de logs de acceso (respaldo local de lo que va a la blockchain)
     cursor.execute('''
@@ -88,24 +100,39 @@ def init_sqlite():
     logger.info("✅ Tablas SQLite creadas/verificadas.")
 
 
-def save_oauth_client(client_id: str, client_secret_hash: str, redirect_uris: list[str], app_name: str) -> bool:
+def save_oauth_client(
+    client_id: str,
+    client_secret_hash: str,
+    redirect_uris: list[str],
+    app_name: str,
+    developer_username: str,
+    developer_password_hash: str
+) -> bool:
     """
-    Guarda un nuevo cliente de OAuth en la base de datos relacional.
-    Serializa la lista de URIs de redirección como una cadena JSON.
+    Guarda un nuevo cliente de OAuth en la base de datos relacional
+    y crea automáticamente la cuenta del desarrollador asociado.
     """
     conn = _get_connection()
     cursor = conn.cursor()
     try:
+        # 1. Guardar cliente
         redirect_uris_json = json.dumps(redirect_uris)
         cursor.execute(
             'INSERT INTO oauth_clients (client_id, client_secret_hash, redirect_uris, app_name) VALUES (?, ?, ?, ?)',
             (client_id, client_secret_hash, redirect_uris_json, app_name)
         )
+        
+        # 2. Crear cuenta de desarrollador asociada
+        cursor.execute(
+            'INSERT OR REPLACE INTO users (user_id, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, ?)',
+            (developer_username, f"Desarrollador {app_name}", "Developer", developer_password_hash, client_id)
+        )
+        
         conn.commit()
-        logger.info(f"🔑 Cliente OAuth '{app_name}' (ID: {client_id}) guardado con éxito.")
+        logger.info(f"🔑 Cliente OAuth '{app_name}' (ID: {client_id}) y desarrollador '{developer_username}' guardados con éxito.")
         return True
     except sqlite3.IntegrityError as e:
-        logger.error(f"❌ Error de integridad al guardar el cliente OAuth {client_id}: {e}")
+        logger.error(f"❌ Error de integridad al guardar el cliente OAuth y su desarrollador: {e}")
         return False
     finally:
         conn.close()
@@ -251,6 +278,35 @@ def get_user_count() -> int:
     result = cursor.fetchone()
     conn.close()
     return result["count"]
+
+
+def get_user_auth_info(user_id: str) -> Optional[dict]:
+    """Obtiene los detalles de autenticación de un usuario por su ID."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, role, password_hash, associated_client_id FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "role": row["role"],
+            "password_hash": row["password_hash"],
+            "associated_client_id": row["associated_client_id"]
+        }
+    return None
+
+
+def update_user_password(user_id: str, new_password_hash: str) -> bool:
+    """Actualiza la contraseña hasheada de un usuario en SQLite."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', (new_password_hash, user_id))
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
 
 
 # Ejecutar la creación de tablas al importar este módulo

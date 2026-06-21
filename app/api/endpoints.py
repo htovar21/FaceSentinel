@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -6,10 +6,28 @@ from app.api.schemas import (
     BlockchainInfoResponse,
     ClientCreate,
     ClientResponse,
+    PasswordAuthRequest,
+    PasswordChangeRequest,
+    BiometricsEnrollRequest,
 )
 import secrets
-from app.services.storage import save_oauth_client, get_oauth_client, get_all_oauth_clients
-from app.core.security import hash_client_secret, generate_idp_token, create_access_token, require_admin
+from app.services.storage import (
+    save_oauth_client,
+    get_oauth_client,
+    get_all_oauth_clients,
+    get_user_auth_info,
+    update_user_password,
+    get_user_by_id,
+    save_user_data,
+)
+from app.core.security import (
+    hash_client_secret,
+    generate_idp_token,
+    create_access_token,
+    require_admin,
+    verify_client_secret,
+    get_current_user,
+)
 
 # Importamos las funciones reales de IA que creamos en el paso anterior
 from app.services.face_recognition import register_face, verify_face, remove_face, base64_to_image
@@ -23,37 +41,37 @@ from app.services.blockchain import (
     is_blockchain_available,
 )
 
-from app.core.security import generate_idp_token
-from app.core.security import create_access_token
-
 router = APIRouter()
 
 @router.post("/clients/register", response_model=ClientResponse, tags=["IdP OAuth / SSO"])
 def register_oauth_client(client_data: ClientCreate, current_user: dict = Depends(require_admin)):
     """
-    Registra una nueva aplicación de terceros (cliente OAuth).
-    Genera un client_id y un client_secret aleatorios y seguros usando URL safe tokens.
-    El client_secret se devuelve en texto plano por única vez en la respuesta.
+    Registra una nueva aplicación de terceros (cliente OAuth) y crea su cuenta Developer asociada.
+    Genera un client_id y un client_secret aleatorios.
     """
     # Generar credenciales seguras
     client_id = f"fs_{secrets.token_urlsafe(32)}"
     client_secret = f"fss_{secrets.token_urlsafe(32)}"
     
-    # Hashear el client_secret usando bcrypt de passlib
+    # Hashear el client_secret
     secret_hash = hash_client_secret(client_secret)
     
-    # Guardar en base de datos SQLite (las URIs se guardan como JSON string en storage.py)
+    # Hashear la contraseña del desarrollador
+    dev_password_hash = hash_client_secret(client_data.developer_password)
+    
     success = save_oauth_client(
         client_id=client_id,
         client_secret_hash=secret_hash,
         redirect_uris=client_data.redirect_uris,
-        app_name=client_data.app_name
+        app_name=client_data.app_name,
+        developer_username=client_data.developer_username,
+        developer_password_hash=dev_password_hash
     )
     
     if not success:
         raise HTTPException(
             status_code=500,
-            detail="No se pudo registrar el cliente en la base de datos."
+            detail="No se pudo registrar el cliente o el desarrollador en la base de datos."
         )
         
     return ClientResponse(
@@ -71,6 +89,114 @@ def list_oauth_clients(current_user: dict = Depends(require_admin)):
     (Sólo disponible para Administradores).
     """
     return get_all_oauth_clients()
+
+
+@router.post("/auth/password", tags=["Autenticación y Registro"])
+def authenticate_by_password(auth_data: PasswordAuthRequest):
+    """
+    Verifica las credenciales tradicionales para roles Admin y Developer.
+    Los usuarios finales (role User/Student/Professor) están estrictamente denegados (403).
+    """
+    user_info = get_user_auth_info(auth_data.username)
+    if not user_info:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales de acceso incorrectas."
+        )
+        
+    # Validar que no sea un usuario final
+    role_lower = user_info["role"].lower()
+    if role_lower not in ["admin", "developer"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado. Los usuarios finales deben autenticarse biométricamente."
+        )
+        
+    # Verificar contraseña hasheada
+    if not user_info["password_hash"] or not verify_client_secret(auth_data.password, user_info["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales de acceso incorrectas."
+        )
+        
+    # Generar token JWT con sub (user_id) y role
+    token = create_access_token(data={"sub": user_info["user_id"], "role": user_info["role"]})
+    
+    return {
+        "success": True,
+        "token": token,
+        "user_id": user_info["user_id"],
+        "user_name": user_info["name"],
+        "role": user_info["role"]
+    }
+
+
+@router.put("/users/me/password", tags=["Autenticación y Registro"])
+def change_my_password(pass_data: PasswordChangeRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Permite a un Administrador o Desarrollador logueado cambiar su contraseña.
+    """
+    user_id = current_user.get("sub")
+    user_info = get_user_auth_info(user_id)
+    if not user_info:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        
+    if not user_info["password_hash"] or not verify_client_secret(pass_data.current_password, user_info["password_hash"]):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta.")
+        
+    # Hashear y actualizar
+    new_hash = hash_client_secret(pass_data.new_password)
+    update_user_password(user_id, new_hash)
+    
+    return {"success": True, "message": "Contraseña actualizada correctamente."}
+
+
+@router.put("/users/me/biometrics", tags=["Autenticación y Registro"])
+def enroll_my_biometrics(bio_data: BiometricsEnrollRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Permite a un Desarrollador o Administrador registrar su rostro para iniciar sesión biométricamente.
+    """
+    user_id = current_user.get("sub")
+    # Buscar usuario en SQLite para conservar su nombre y rol
+    user_info = get_user_by_id(user_id)
+    if not user_info:
+        # Si no se encuentra en get_user_by_id, consultar get_user_auth_info
+        auth_info = get_user_auth_info(user_id)
+        if not auth_info:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        user_info = {"name": auth_info["name"], "role": auth_info["role"]}
+        
+    success, message = register_face(
+        user_id=user_id,
+        name=user_info["name"],
+        role=user_info["role"],
+        base64_image=bio_data.image_base64
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+        
+    return {"success": True, "message": "Biometría facial enrolada con éxito."}
+
+
+@router.get("/clients/my", tags=["IdP OAuth / SSO"])
+def get_my_client_app(current_user: dict = Depends(get_current_user)):
+    """
+    Retorna la configuración de la aplicación cliente asociada al Desarrollador logueado.
+    """
+    user_id = current_user.get("sub")
+    user_info = get_user_auth_info(user_id)
+    if not user_info or not user_info.get("associated_client_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. No tienes una aplicación de terceros asociada."
+        )
+        
+    client = get_oauth_client(user_info["associated_client_id"])
+    if not client:
+        raise HTTPException(status_code=404, detail="Aplicación asociada no encontrada.")
+        
+    return client
 
 
 @router.post("/register", tags=["Autenticación y Registro"])
@@ -147,7 +273,7 @@ def get_user_auth_history(
 def get_client_logs(
     client_id: str,
     limit: int = Query(default=50, ge=1, le=100, description="Cantidad de registros a retornar"),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Obtiene los registros de autenticación asociados a un clientId específico en la blockchain.
@@ -156,6 +282,25 @@ def get_client_logs(
         raise HTTPException(
             status_code=503,
             detail="Blockchain no disponible. Verifica que Ganache esté corriendo."
+        )
+        
+    # Validar permisos (IDOR Protection)
+    user_role = current_user.get("role", "").lower()
+    user_id = current_user.get("sub")
+    
+    if user_role == "admin":
+        pass
+    elif user_role == "developer":
+        user_info = get_user_auth_info(user_id)
+        if not user_info or user_info.get("associated_client_id") != client_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Acceso denegado. No puedes consultar los logs de otra aplicación."
+            )
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Rol no autorizado para ver logs de aplicaciones."
         )
     
     logs = get_recent_records_by_client(client_id, limit)

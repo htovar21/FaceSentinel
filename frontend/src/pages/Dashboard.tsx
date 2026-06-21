@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Activity, ShieldCheck, Lock, LogOut, User, Trash2, Clock, CheckCircle2, XCircle } from "lucide-react"
 import axios from "axios"
 import AdminPanel from "../components/AdminPanel"
+import DeveloperPanel from "../components/DeveloperPanel"
 
 interface AuthEvent {
     id: number
@@ -91,186 +92,230 @@ export default function Dashboard() {
             </header>
 
             <main className="flex-1 container mx-auto p-4 md:p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-2xl font-bold tracking-tight">Panel Principal</h2>
-                        <p className="text-muted-foreground">
-                            Has accedido a un área segura usando autenticación facial y registros inmutables.
-                        </p>
-                    </div>
-                    {userRole.toLowerCase() === "admin" && (
-                        <div className="flex bg-muted p-1 rounded-lg border border-border shadow-sm">
-                            <Button 
-                                variant={activeTab === "user" ? "default" : "ghost"} 
-                                size="sm" 
-                                className="text-xs h-8"
-                                onClick={() => setActiveTab("user")}
-                            >
-                                Mi Panel
-                            </Button>
-                            <Button 
-                                variant={activeTab === "admin" ? "default" : "ghost"} 
-                                size="sm" 
-                                className="text-xs h-8"
-                                onClick={() => setActiveTab("admin")}
-                            >
-                                Consola Admin
-                            </Button>
-                        </div>
-                    )}
-                </div>
-
-                {activeTab === "admin" ? (
-                    <AdminPanel />
-                ) : (
-                    <>
-                        <div className="grid gap-4 md:grid-cols-4">
-                            {/* Perfil del Usuario */}
-                            <Card className="md:col-span-1 border-primary/20">
-                                <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-medium flex items-center">
-                                        <User className="h-4 w-4 mr-2 text-primary" /> Mi Perfil
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-xl font-bold truncate">{userName}</div>
-                                    <p className="text-xs text-muted-foreground mt-1">ID: {userId}</p>
-                                    <p className="text-xs text-muted-foreground">Rol: {userRole}</p>
-                                </CardContent>
-                                <CardFooter className="pt-0">
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        className="w-full mt-4 bg-red-500/10 text-red-600 hover:bg-red-500/20 shadow-none border border-red-200"
-                                        onClick={handleDeleteAccount}
-                                        disabled={deleteLoading}
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        {deleteLoading ? "Borrando..." : "Eliminar Cuenta"}
-                                    </Button>
-                                </CardFooter>
-                            </Card>
-
-                            {/* Status Cards */}
-                            <Card className="md:col-span-1">
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">Estado Backend</CardTitle>
-                                    <Activity className="h-4 w-4 text-muted-foreground" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold">
-                                        {dbStatus?.status === 'online' ? (
-                                            <span className="text-green-600">Online</span>
-                                        ) : (
-                                            <span className="text-red-500">Offline</span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1">API Node</p>
-                                </CardContent>
-                            </Card>
-
-                            <Card className="md:col-span-1">
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">Blockchain</CardTitle>
-                                    <Lock className="h-4 w-4 text-muted-foreground" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold">
-                                        {dbStatus?.blockchain === 'connected' ? (
-                                            <span className="text-primary">Conectada</span>
-                                        ) : (
-                                            <span className="text-muted-foreground">Desconectada</span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1">Status Web3</p>
-                                </CardContent>
-                            </Card>
-
-                            <Card className="md:col-span-1">
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">Seguridad</CardTitle>
-                                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold text-green-600">Alta</div>
-                                    <p className="text-xs text-muted-foreground mt-1">Anti-spoofing activo</p>
-                                </CardContent>
-                            </Card>
-                        </div>
-
-                        <Card className="mt-6">
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Clock className="h-5 w-5 text-primary" /> Historial de Acceso
-                                </CardTitle>
-                                <CardDescription>
-                                    Registros inmutables en la red Web3 para este usuario.
-                                </CardDescription>
+                {userRole.toLowerCase() === "developer" ? (
+                    <DeveloperPanel />
+                ) : userRole.toLowerCase() !== "admin" ? (
+                    // Pantalla minimalista para usuario final (Student / Professor / User)
+                    <div className="flex justify-center items-center py-12">
+                        <Card className="w-full max-w-md border-primary/20 shadow-lg relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-50" />
+                            <CardHeader className="text-center space-y-2 pb-4 z-10 relative">
+                                <div className="h-14 w-14 rounded-full bg-green-500/10 flex items-center justify-center text-green-600 mx-auto shadow-inner border border-green-200">
+                                    <ShieldCheck className="h-8 w-8" />
+                                </div>
+                                <CardTitle className="text-xl font-extrabold tracking-tight text-foreground">Identidad Activa</CardTitle>
+                                <CardDescription className="text-xs">Sesión biométrica iniciada con FaceSentinel</CardDescription>
                             </CardHeader>
-                            <CardContent>
-                                {historyLoading ? (
-                                    <div className="flex justify-center p-8 text-muted-foreground animate-pulse">
-                                        Cargando bloques...
+                            <CardContent className="space-y-4 text-sm z-10 relative">
+                                <div className="p-4 rounded-lg bg-muted/50 border border-border/50 space-y-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Nombre:</span>
+                                        <span className="font-semibold text-foreground">{userName}</span>
                                     </div>
-                                ) : authHistory.length > 0 ? (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
-                                                <tr>
-                                                    <th className="px-4 py-3 rounded-tl-md">Estado</th>
-                                                    <th className="px-4 py-3">Fecha y Hora</th>
-                                                    <th className="px-4 py-3">Score (Distancia)</th>
-                                                    <th className="px-4 py-3 rounded-tr-md">Transacción (TxHash)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {authHistory.map((log, i) => (
-                                                    <tr key={i} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
-                                                        <td className="px-4 py-3">
-                                                            {log.access_granted ? (
-                                                                <span className="flex items-center text-green-600 font-medium">
-                                                                    <CheckCircle2 className="w-4 h-4 mr-2" /> Permitido
-                                                                </span>
-                                                            ) : (
-                                                                <span className="flex items-center text-red-600 font-medium">
-                                                                    <XCircle className="w-4 h-4 mr-2" /> Denegado
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            {new Date((log.timestamp as any) * 1000).toLocaleString()}
-                                                        </td>
-                                                        <td className="px-4 py-3 font-mono">
-                                                            {log.match_score !== null && log.match_score !== undefined
-                                                                ? log.match_score.toFixed(4)
-                                                                : "N/A"}
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            {log.tx_hash && log.tx_hash !== "N/A" ? (
-                                                                <a
-                                                                    href={`#`}
-                                                                    className="text-primary hover:underline font-mono text-xs flex items-center"
-                                                                    title="Ver en explorador de bloques"
-                                                                >
-                                                                    {log.tx_hash.substring(0, 10)}...{log.tx_hash.substring(log.tx_hash.length - 8)}
-                                                                </a>
-                                                            ) : (
-                                                                <span className="text-muted-foreground">Local / Sin TxHash</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">ID de Usuario:</span>
+                                        <span className="font-mono text-foreground font-semibold">{userId}</span>
                                     </div>
-                                ) : (
-                                    <div className="rounded-md border border-dashed p-8 flex flex-col items-center justify-center text-muted-foreground bg-muted/20">
-                                        <Clock className="h-8 w-8 mb-4 text-muted-foreground/50" />
-                                        <p>No hay eventos registrados en la blockchain para este usuario.</p>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Rol asignado:</span>
+                                        <span className="font-semibold text-primary">{userRole}</span>
                                     </div>
-                                )}
+                                </div>
                             </CardContent>
+                            <CardFooter className="z-10 relative pt-2">
+                                <Button 
+                                    className="w-full" 
+                                    variant="outline"
+                                    onClick={handleLogout}
+                                >
+                                    Cerrar Sesión
+                                </Button>
+                            </CardFooter>
                         </Card>
+                    </div>
+                ) : (
+                    // Administrador
+                    <>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-2xl font-bold tracking-tight">Panel Principal</h2>
+                                <p className="text-muted-foreground">
+                                    Has accedido a un área segura usando autenticación facial y registros inmutables.
+                                </p>
+                            </div>
+                            <div className="flex bg-muted p-1 rounded-lg border border-border shadow-sm">
+                                <Button 
+                                    variant={activeTab === "user" ? "default" : "ghost"} 
+                                    size="sm" 
+                                    className="text-xs h-8"
+                                    onClick={() => setActiveTab("user")}
+                                >
+                                    Mi Panel
+                                </Button>
+                                <Button 
+                                    variant={activeTab === "admin" ? "default" : "ghost"} 
+                                    size="sm" 
+                                    className="text-xs h-8"
+                                    onClick={() => setActiveTab("admin")}
+                                >
+                                    Consola Admin
+                                </Button>
+                            </div>
+                        </div>
+
+                        {activeTab === "admin" ? (
+                            <AdminPanel />
+                        ) : (
+                            <>
+                                <div className="grid gap-4 md:grid-cols-4">
+                                    {/* Perfil del Usuario */}
+                                    <Card className="md:col-span-1 border-primary/20">
+                                        <CardHeader className="pb-2">
+                                            <CardTitle className="text-sm font-medium flex items-center">
+                                                <User className="h-4 w-4 mr-2 text-primary" /> Mi Perfil
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="text-xl font-bold truncate">{userName}</div>
+                                            <p className="text-xs text-muted-foreground mt-1">ID: {userId}</p>
+                                            <p className="text-xs text-muted-foreground">Rol: {userRole}</p>
+                                        </CardContent>
+                                        <CardFooter className="pt-0">
+                                            <Button
+                                                variant="destructive"
+                                                size="sm"
+                                                className="w-full mt-4 bg-red-500/10 text-red-600 hover:bg-red-500/20 shadow-none border border-red-200"
+                                                onClick={handleDeleteAccount}
+                                                disabled={deleteLoading}
+                                            >
+                                                <Trash2 className="h-4 w-4 mr-2" />
+                                                {deleteLoading ? "Borrando..." : "Eliminar Cuenta"}
+                                            </Button>
+                                        </CardFooter>
+                                    </Card>
+
+                                    {/* Status Cards */}
+                                    <Card className="md:col-span-1">
+                                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                            <CardTitle className="text-sm font-medium">Estado Backend</CardTitle>
+                                            <Activity className="h-4 w-4 text-muted-foreground" />
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="text-2xl font-bold">
+                                                {dbStatus?.status === 'online' ? (
+                                                    <span className="text-green-600">Online</span>
+                                                ) : (
+                                                    <span className="text-red-500">Offline</span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-1">API Node</p>
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card className="md:col-span-1">
+                                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                            <CardTitle className="text-sm font-medium">Blockchain</CardTitle>
+                                            <Lock className="h-4 w-4 text-muted-foreground" />
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="text-2xl font-bold">
+                                                {dbStatus?.blockchain === 'connected' ? (
+                                                    <span className="text-primary">Conectada</span>
+                                                ) : (
+                                                    <span className="text-muted-foreground">Desconectada</span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-1">Status Web3</p>
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card className="md:col-span-1">
+                                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                            <CardTitle className="text-sm font-medium">Seguridad</CardTitle>
+                                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="text-2xl font-bold text-green-600">Alta</div>
+                                            <p className="text-xs text-muted-foreground mt-1">Anti-spoofing activo</p>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                <Card className="mt-6">
+                                    <CardHeader>
+                                        <CardTitle className="flex items-center gap-2">
+                                            <Clock className="h-5 w-5 text-primary" /> Historial de Acceso
+                                        </CardTitle>
+                                        <CardDescription>
+                                            Registros inmutables en la red Web3 para este usuario.
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        {historyLoading ? (
+                                            <div className="flex justify-center p-8 text-muted-foreground animate-pulse">
+                                                Cargando bloques...
+                                            </div>
+                                        ) : authHistory.length > 0 ? (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm text-left">
+                                                    <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
+                                                        <tr>
+                                                            <th className="px-4 py-3 rounded-tl-md">Estado</th>
+                                                            <th className="px-4 py-3">Fecha y Hora</th>
+                                                            <th className="px-4 py-3">Score (Distancia)</th>
+                                                            <th className="px-4 py-3 rounded-tr-md">Transacción (TxHash)</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {authHistory.map((log, i) => (
+                                                            <tr key={i} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                                                                <td className="px-4 py-3">
+                                                                    {log.access_granted ? (
+                                                                        <span className="flex items-center text-green-600 font-medium">
+                                                                            <CheckCircle2 className="w-4 h-4 mr-2" /> Permitido
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="flex items-center text-red-600 font-medium">
+                                                                            <XCircle className="w-4 h-4 mr-2" /> Denegado
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-4 py-3">
+                                                                    {new Date((log.timestamp as any) * 1000).toLocaleString()}
+                                                                </td>
+                                                                <td className="px-4 py-3 font-mono">
+                                                                    {log.match_score !== null && log.match_score !== undefined
+                                                                        ? log.match_score.toFixed(4)
+                                                                        : "N/A"}
+                                                                </td>
+                                                                <td className="px-4 py-3">
+                                                                    {log.tx_hash && log.tx_hash !== "N/A" ? (
+                                                                        <a
+                                                                            href={`#`}
+                                                                            className="text-primary hover:underline font-mono text-xs flex items-center"
+                                                                            title="Ver en explorador de bloques"
+                                                                        >
+                                                                            {log.tx_hash.substring(0, 10)}...{log.tx_hash.substring(log.tx_hash.length - 8)}
+                                                                        </a>
+                                                                    ) : (
+                                                                        <span className="text-muted-foreground">Local / Sin TxHash</span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-md border border-dashed p-8 flex flex-col items-center justify-center text-muted-foreground bg-muted/20">
+                                                <Clock className="h-8 w-8 mb-4 text-muted-foreground/50" />
+                                                <p>No hay eventos registrados en la blockchain para este usuario.</p>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </>
+                        )}
                     </>
                 )}
             </main>

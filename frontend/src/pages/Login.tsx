@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Camera, CheckCircle2, UserCircle2, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
 import axios from "axios"
 
@@ -22,6 +24,8 @@ export default function Login() {
     const [livenessMetrics, setLivenessMetrics] = useState<any>(null)
     const [authDistance, setAuthDistance] = useState<number | null>(null)
     const [idpToken, setIdpToken] = useState<string>("")
+    const [usernameInput, setUsernameInput] = useState("")
+    const [passwordInput, setPasswordInput] = useState("")
 
     const videoRef = useRef<HTMLVideoElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -53,7 +57,7 @@ export default function Login() {
         }
     }, [stopCameraAndSocket])
 
-    const startCamera = async () => {
+    const startCamera = useCallback(async () => {
         try {
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
             streamRef.current = mediaStream
@@ -64,6 +68,65 @@ export default function Login() {
             setLivenessMessage("Conectando con motor Anti-Spoofing...")
         } catch (err) {
             setError("No se pudo acceder a la cámara. Revisa los permisos.")
+        }
+    }, [])
+
+    useEffect(() => {
+        if (clientId) {
+            startCamera()
+        }
+    }, [clientId, startCamera])
+
+    const handleCredentialsSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!usernameInput || !passwordInput) {
+            setError("Por favor complete todos los campos")
+            return
+        }
+
+        setLoading(true)
+        setError("")
+        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+
+        try {
+            const response = await axios.post(`${baseUrl}/api/v1/auth/password`, {
+                username: usernameInput,
+                password: passwordInput
+            })
+
+            if (response.data.success) {
+                localStorage.setItem("user_id", response.data.user_id || "")
+                localStorage.setItem("user_name", response.data.user_name || "Usuario verificado")
+                localStorage.setItem("role", response.data.role || "")
+                localStorage.setItem("token", response.data.token || "")
+
+                setUserName(response.data.user_name || "Usuario")
+                setStep("success")
+
+                setTimeout(() => {
+                    if (redirectUri && response.data.token) {
+                        try {
+                            const url = new URL(redirectUri)
+                            if (url.hostname.includes("jwt.io")) {
+                                url.hash = `token=${response.data.token}`
+                            } else {
+                                url.searchParams.append("token", response.data.token)
+                            }
+                            window.location.href = url.toString()
+                        } catch (urlErr) {
+                            setError("Error al construir la URL de redirección")
+                        }
+                    } else {
+                        navigate("/dashboard")
+                    }
+                }, 2000)
+            } else {
+                setError(response.data.message || "Credenciales incorrectas")
+            }
+        } catch (err: any) {
+            setError(err.response?.data?.detail || "Error al conectar con el servidor o credenciales inválidas")
+        } finally {
+            setLoading(false)
         }
     }
 
@@ -289,7 +352,11 @@ export default function Login() {
                         {appName ? `Iniciar sesión en ${appName}` : "Acceso a FaceSentinel"}
                     </CardTitle>
                     <CardDescription>
-                        {step === "username" && (appName ? `Iniciando sesión segura en ${appName} con FaceSentinel` : "Inicia sesión con tu rostro para entrar")}
+                        {step === "username" && (
+                            clientId 
+                                ? `Iniciando sesión segura en ${appName || "la aplicación"} con FaceSentinel` 
+                                : "Inicia sesión con tu cuenta para acceder al panel"
+                        )}
                         {step === "camera" && "Prueba de Vida Activa Requerida"}
                         {step === "success" && "¡Identidad verificada!"}
                     </CardDescription>
@@ -313,16 +380,69 @@ export default function Login() {
                             </div>
                         )}
 
-                        {step === "username" && (
-                            <div className="rounded-lg border bg-card p-4 flex flex-col items-center justify-center text-center space-y-3">
-                                <Camera className="h-10 w-10 text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">
-                                    Nuestro sistema utiliza reconocimiento facial con prueba activa de vida e inmutabilidad en blockchain.
-                                </p>
+                        {step === "username" && clientId && (
+                            <div className="rounded-lg border bg-card p-6 flex flex-col items-center justify-center text-center space-y-4">
+                                <Camera className="h-12 w-12 text-primary animate-pulse" />
+                                <div className="space-y-2">
+                                    <h3 className="font-bold text-lg">Autenticación Biométrica SSO</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        FaceSentinel está iniciando el escáner facial seguro para {appName || "tu aplicación"}.
+                                    </p>
+                                </div>
                                 <Button className="w-full mt-2" size="lg" onClick={startCamera}>
                                     Iniciar Escáner Activo
                                 </Button>
                             </div>
+                        )}
+
+                        {step === "username" && !clientId && (
+                            <form onSubmit={handleCredentialsSubmit} className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="username">Usuario o Correo</Label>
+                                    <Input
+                                        id="username"
+                                        type="text"
+                                        placeholder="Ingrese su usuario o correo"
+                                        value={usernameInput}
+                                        onChange={(e) => setUsernameInput(e.target.value)}
+                                        required
+                                        className="h-11"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="password">Contraseña</Label>
+                                    <Input
+                                        id="password"
+                                        type="password"
+                                        placeholder="••••••••"
+                                        value={passwordInput}
+                                        onChange={(e) => setPasswordInput(e.target.value)}
+                                        required
+                                        className="h-11"
+                                    />
+                                </div>
+                                <Button className="w-full h-11 text-base font-medium mt-2" type="submit" disabled={loading}>
+                                    {loading ? "Iniciando sesión..." : "Iniciar Sesión"}
+                                </Button>
+                                
+                                <div className="relative my-4 flex items-center justify-center">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <span className="w-full border-t border-muted" />
+                                    </div>
+                                    <span className="relative bg-background px-3 text-xs text-muted-foreground uppercase">
+                                        O ingresa usando
+                                    </span>
+                                </div>
+
+                                <Button
+                                    variant="outline"
+                                    type="button"
+                                    className="w-full h-11 text-sm flex items-center justify-center gap-2 border-primary/20 hover:bg-primary/5 transition-colors"
+                                    onClick={startCamera}
+                                >
+                                    <Camera className="h-4 w-4 text-primary" /> Entrar con Biometría
+                                </Button>
+                            </form>
                         )}
 
                         {step === "camera" && (

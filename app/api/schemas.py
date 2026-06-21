@@ -71,6 +71,8 @@ class ClientCreate(BaseModel):
     """Modelo para registrar una nueva aplicación cliente de terceros."""
     app_name: str
     redirect_uris: List[str]
+    developer_username: str
+    developer_password: str
 
 
 class ClientResponse(BaseModel):
@@ -78,4 +80,21 @@ class ClientResponse(BaseModel):
     client_id: str
     client_secret: Optional[str] = None
     app_name: str
-    redirect_uris: List[str]
+    redirect_uris: List[str]
+
+
+class PasswordAuthRequest(BaseModel):
+    """Modelo para iniciar sesión con contraseña tradicional."""
+    username: str
+    password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    """Modelo para cambiar la contraseña del usuario logueado."""
+    current_password: str
+    new_password: str
+
+
+class BiometricsEnrollRequest(BaseModel):
+    """Modelo para enrolar la biometría facial del usuario logueado."""
+    image_base64: str

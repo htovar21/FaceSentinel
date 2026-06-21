@@ -95,20 +95,24 @@ class TestRegistration:
 # =========================================================================
 
 class TestAuthentication:
-    """Tests para el endpoint de autenticación."""
+    """Tests para los endpoints de autenticación."""
 
-    def test_authenticate_without_image(self, client):
-        """Verifica que autenticar sin imagen da error 422."""
-        payload = {}
-        response = client.post("/api/v1/authenticate", json=payload)
-        assert response.status_code == 422
-
-    def test_authenticate_empty_db(self, client, sample_image_base64):
-        """Verifica el comportamiento con la base de datos vacía."""
+    def test_deprecated_authenticate_returns_410(self, client, sample_image_base64):
+        """Verifica que el antiguo endpoint biométrico POST retorne 410 (Deprecated)."""
         payload = {"image_base64": sample_image_base64}
         response = client.post("/api/v1/authenticate", json=payload)
-        # Puede dar 401 (no encontrado) o 400 (no se detectó rostro en imagen de prueba)
-        assert response.status_code in [400, 401]
+        assert response.status_code == 410
+
+    def test_password_auth_missing_fields(self, client):
+        """Verifica que falten campos retorne 422."""
+        response = client.post("/api/v1/auth/password", json={})
+        assert response.status_code == 422
+
+    def test_password_auth_invalid_credentials(self, client):
+        """Verifica que credenciales incorrectas retornen 401."""
+        payload = {"username": "non_existent_developer", "password": "wrongpassword"}
+        response = client.post("/api/v1/auth/password", json=payload)
+        assert response.status_code == 401
 
 
 # =========================================================================
