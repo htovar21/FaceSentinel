@@ -12,13 +12,14 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
-from passlib.context import CryptContext
+import bcrypt
 
 import jwt
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 # =========================================================================
 #                        CONFIGURACIÓN JWT
@@ -31,9 +32,6 @@ JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "60"))
 # Esquemas de seguridad para FastAPI/Swagger
 bearer_scheme = HTTPBearer(auto_error=False)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-# Configuración de Hasheo con Bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # =========================================================================
@@ -115,16 +113,24 @@ def generate_idp_token(user_id: str, client_id: str, role: str = "user", expires
 
 def hash_client_secret(secret: str) -> str:
     """
-    Hashea un client_secret usando passlib con el algoritmo bcrypt.
+    Hashea un client_secret usando la librería bcrypt de forma directa.
     """
-    return pwd_context.hash(secret)
+    secret_bytes = secret.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(secret_bytes, salt)
+    return hashed.decode("utf-8")
 
 
 def verify_client_secret(secret: str, hashed_secret: str) -> bool:
     """
     Verifica si un client_secret en texto plano coincide con su hash bcrypt.
     """
-    return pwd_context.verify(secret, hashed_secret)
+    try:
+        secret_bytes = secret.encode("utf-8")
+        hashed_bytes = hashed_secret.encode("utf-8")
+        return bcrypt.checkpw(secret_bytes, hashed_bytes)
+    except Exception:
+        return False
 
 
 # =========================================================================

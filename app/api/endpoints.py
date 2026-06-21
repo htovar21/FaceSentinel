@@ -15,7 +15,8 @@ from app.services.storage import (
     save_oauth_client,
     get_oauth_client,
     get_all_oauth_clients,
-    get_user_auth_info,
+    get_user_auth_info_by_username,
+    get_user_auth_info_by_id,
     update_user_password,
     get_user_by_id,
     save_user_data,
@@ -64,6 +65,7 @@ def register_oauth_client(client_data: ClientCreate, current_user: dict = Depend
         client_secret_hash=secret_hash,
         redirect_uris=client_data.redirect_uris,
         app_name=client_data.app_name,
+        developer_user_id=client_data.developer_user_id,
         developer_username=client_data.developer_username,
         developer_password_hash=dev_password_hash
     )
@@ -97,7 +99,7 @@ def authenticate_by_password(auth_data: PasswordAuthRequest):
     Verifica las credenciales tradicionales para roles Admin y Developer.
     Los usuarios finales (role User/Student/Professor) están estrictamente denegados (403).
     """
-    user_info = get_user_auth_info(auth_data.username)
+    user_info = get_user_auth_info_by_username(auth_data.username)
     if not user_info:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,7 +139,7 @@ def change_my_password(pass_data: PasswordChangeRequest, current_user: dict = De
     Permite a un Administrador o Desarrollador logueado cambiar su contraseña.
     """
     user_id = current_user.get("sub")
-    user_info = get_user_auth_info(user_id)
+    user_info = get_user_auth_info_by_id(user_id)
     if not user_info:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
@@ -161,7 +163,7 @@ def enroll_my_biometrics(bio_data: BiometricsEnrollRequest, current_user: dict =
     user_info = get_user_by_id(user_id)
     if not user_info:
         # Si no se encuentra en get_user_by_id, consultar get_user_auth_info
-        auth_info = get_user_auth_info(user_id)
+        auth_info = get_user_auth_info_by_id(user_id)
         if not auth_info:
             raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         user_info = {"name": auth_info["name"], "role": auth_info["role"]}
@@ -185,7 +187,7 @@ def get_my_client_app(current_user: dict = Depends(get_current_user)):
     Retorna la configuración de la aplicación cliente asociada al Desarrollador logueado.
     """
     user_id = current_user.get("sub")
-    user_info = get_user_auth_info(user_id)
+    user_info = get_user_auth_info_by_id(user_id)
     if not user_info or not user_info.get("associated_client_id"):
         raise HTTPException(
             status_code=403,
@@ -291,7 +293,7 @@ def get_client_logs(
     if user_role == "admin":
         pass
     elif user_role == "developer":
-        user_info = get_user_auth_info(user_id)
+        user_info = get_user_auth_info_by_id(user_id)
         if not user_info or user_info.get("associated_client_id") != client_id:
             raise HTTPException(
                 status_code=403,

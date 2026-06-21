@@ -51,6 +51,7 @@ def init_sqlite():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
+            username TEXT UNIQUE,
             name TEXT NOT NULL,
             role TEXT NOT NULL,
             password_hash TEXT,
@@ -67,6 +68,10 @@ def init_sqlite():
         pass
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN associated_client_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
     except sqlite3.OperationalError:
         pass
 
@@ -105,6 +110,7 @@ def save_oauth_client(
     client_secret_hash: str,
     redirect_uris: list[str],
     app_name: str,
+    developer_user_id: str,
     developer_username: str,
     developer_password_hash: str
 ) -> bool:
@@ -124,8 +130,8 @@ def save_oauth_client(
         
         # 2. Crear cuenta de desarrollador asociada
         cursor.execute(
-            'INSERT OR REPLACE INTO users (user_id, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, ?)',
-            (developer_username, f"Desarrollador {app_name}", "Developer", developer_password_hash, client_id)
+            'INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, ?, ?)',
+            (developer_user_id, developer_username, f"Desarrollador {app_name}", "Developer", developer_password_hash, client_id)
         )
         
         conn.commit()
@@ -222,12 +228,12 @@ def get_user_by_id(user_id: str):
     """Busca los datos de un usuario por su ID en SQLite."""
     conn = _get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT name, role FROM users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT name, role, username FROM users WHERE user_id = ?', (user_id,))
     result = cursor.fetchone()
     conn.close()
 
     if result:
-        return {"name": result["name"], "role": result["role"]}
+        return {"name": result["name"], "role": result["role"], "username": result["username"]}
     return None
 
 
@@ -280,16 +286,36 @@ def get_user_count() -> int:
     return result["count"]
 
 
-def get_user_auth_info(user_id: str) -> Optional[dict]:
-    """Obtiene los detalles de autenticación de un usuario por su ID."""
+def get_user_auth_info_by_username(username: str) -> Optional[dict]:
+    """Obtiene los detalles de autenticación de un usuario por su username."""
     conn = _get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT user_id, name, role, password_hash, associated_client_id FROM users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT user_id, username, name, role, password_hash, associated_client_id FROM users WHERE username = ?', (username,))
     row = cursor.fetchone()
     conn.close()
     if row:
         return {
             "user_id": row["user_id"],
+            "username": row["username"],
+            "name": row["name"],
+            "role": row["role"],
+            "password_hash": row["password_hash"],
+            "associated_client_id": row["associated_client_id"]
+        }
+    return None
+
+
+def get_user_auth_info_by_id(user_id: str) -> Optional[dict]:
+    """Obtiene los detalles de autenticación de un usuario por su ID (Cédula)."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, username, name, role, password_hash, associated_client_id FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "user_id": row["user_id"],
+            "username": row["username"],
             "name": row["name"],
             "role": row["role"],
             "password_hash": row["password_hash"],

@@ -71,6 +71,7 @@ class ClientCreate(BaseModel):
     """Modelo para registrar una nueva aplicación cliente de terceros."""
     app_name: str
     redirect_uris: List[str]
+    developer_user_id: str
     developer_username: str
     developer_password: str
 

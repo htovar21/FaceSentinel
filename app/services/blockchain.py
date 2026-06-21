@@ -48,8 +48,8 @@ def init_blockchain():
         return False
 
     try:
-        # Conectar a la blockchain
-        _w3 = Web3(Web3.HTTPProvider(settings.BLOCKCHAIN_RPC_URL))
+        # Conectar a la blockchain con un timeout para evitar que bloquee el inicio del servidor
+        _w3 = Web3(Web3.HTTPProvider(settings.BLOCKCHAIN_RPC_URL, request_kwargs={'timeout': 3}))
 
         if not _w3.is_connected():
             logger.warning(

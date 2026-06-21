@@ -31,6 +31,9 @@ export default function AdminPanel() {
     // Register client form
     const [appName, setAppName] = useState("")
     const [redirectUriInput, setRedirectUriInput] = useState("")
+    const [devCedula, setDevCedula] = useState("")
+    const [devUsername, setDevUsername] = useState("")
+    const [devPassword, setDevPassword] = useState("")
     const [registering, setRegistering] = useState(false)
     const [newClientResult, setNewClientResult] = useState<{ client_id: string; client_secret: string } | null>(null)
     const [copiedId, setCopiedId] = useState(false)
@@ -61,7 +64,7 @@ export default function AdminPanel() {
 
     const handleRegisterClient = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!appName || !redirectUriInput) {
+        if (!appName || !redirectUriInput || !devCedula || !devUsername || !devPassword) {
             alert("Completa todos los campos.")
             return
         }
@@ -75,7 +78,10 @@ export default function AdminPanel() {
         try {
             const res = await axios.post(`${baseUrl}/api/v1/clients/register`, {
                 app_name: appName,
-                redirect_uris: redirectUris
+                redirect_uris: redirectUris,
+                developer_user_id: devCedula,
+                developer_username: devUsername,
+                developer_password: devPassword
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
@@ -86,6 +92,9 @@ export default function AdminPanel() {
             })
             setAppName("")
             setRedirectUriInput("")
+            setDevCedula("")
+            setDevUsername("")
+            setDevPassword("")
             fetchClients()
         } catch (err: any) {
             setError(err.response?.data?.detail || "Error al registrar la aplicación.")
@@ -187,6 +196,37 @@ export default function AdminPanel() {
                                     placeholder="http://localhost:3000/callback, https://jwt.io/"
                                     value={redirectUriInput}
                                     onChange={e => setRedirectUriInput(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="devCedula">Cédula del Desarrollador</Label>
+                                <Input
+                                    id="devCedula"
+                                    placeholder="12345678"
+                                    value={devCedula}
+                                    onChange={e => setDevCedula(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="devUsername">Username del Desarrollador</Label>
+                                <Input
+                                    id="devUsername"
+                                    placeholder="dev_user"
+                                    value={devUsername}
+                                    onChange={e => setDevUsername(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="devPassword">Contraseña del Desarrollador</Label>
+                                <Input
+                                    id="devPassword"
+                                    type="password"
+                                    placeholder="••••••••"
+                                    value={devPassword}
+                                    onChange={e => setDevPassword(e.target.value)}
                                     required
                                 />
                             </div>
