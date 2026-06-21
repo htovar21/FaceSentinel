@@ -94,15 +94,16 @@ def verify_token(token: str) -> dict:
         )
 
 
-def generate_idp_token(user_id: str, client_id: str, expires_delta_minutes: int = 3) -> str:
+def generate_idp_token(user_id: str, client_id: str, role: str = "user", expires_delta_minutes: int = 3) -> str:
     """
     Genera un token JWT de federación (IdP) con una expiración muy corta.
-    Incluye al usuario en el claim 'sub' y al cliente de terceros en 'aud'.
+    Incluye al usuario en el claim 'sub', al cliente de terceros en 'aud' y el rol en 'role'.
     """
     payload = {
         "sub": user_id,
         "aud": client_id,
         "iss": "facesentinel-idp",
+        "role": role,
     }
     return create_access_token(data=payload, expires_delta=timedelta(minutes=expires_delta_minutes))
 
@@ -236,7 +237,7 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     Dependency que solo permite acceso a administradores.
     Se encadena con get_current_user.
     """
-    if user.get("role") != "admin":
+    if user.get("role", "").lower() != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requiere rol de administrador.",

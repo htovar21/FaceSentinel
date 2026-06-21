@@ -195,6 +195,7 @@ export default function Login() {
                     localStorage.setItem("user_id", data.user_id || "")
                     localStorage.setItem("user_name", data.user_name || "Usuario verificado")
                     localStorage.setItem("role", data.role || "")
+                    localStorage.setItem("token", data.token || "")
                     setUserName(data.user_name || "Usuario verificado")
 
                     const token = data.token

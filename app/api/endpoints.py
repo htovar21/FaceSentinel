@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -8,8 +8,8 @@ from app.api.schemas import (
     ClientResponse,
 )
 import secrets
-from app.services.storage import save_oauth_client, get_oauth_client
-from app.core.security import hash_client_secret, generate_idp_token, create_access_token
+from app.services.storage import save_oauth_client, get_oauth_client, get_all_oauth_clients
+from app.core.security import hash_client_secret, generate_idp_token, create_access_token, require_admin
 
 # Importamos las funciones reales de IA que creamos en el paso anterior
 from app.services.face_recognition import register_face, verify_face, remove_face, base64_to_image
@@ -29,7 +29,7 @@ from app.core.security import create_access_token
 router = APIRouter()
 
 @router.post("/clients/register", response_model=ClientResponse, tags=["IdP OAuth / SSO"])
-def register_oauth_client(client_data: ClientCreate):
+def register_oauth_client(client_data: ClientCreate, current_user: dict = Depends(require_admin)):
     """
     Registra una nueva aplicación de terceros (cliente OAuth).
     Genera un client_id y un client_secret aleatorios y seguros usando URL safe tokens.
@@ -62,6 +62,15 @@ def register_oauth_client(client_data: ClientCreate):
         app_name=client_data.app_name,
         redirect_uris=client_data.redirect_uris
     )
+
+
+@router.get("/clients", tags=["IdP OAuth / SSO"])
+def list_oauth_clients(current_user: dict = Depends(require_admin)):
+    """
+    Lista todos los clientes OAuth registrados en el IdP.
+    (Sólo disponible para Administradores).
+    """
+    return get_all_oauth_clients()
 
 
 @router.post("/register", tags=["Autenticación y Registro"])
@@ -137,7 +146,8 @@ def get_user_auth_history(
 @router.get("/clients/{client_id}/logs", tags=["Blockchain"])
 def get_client_logs(
     client_id: str,
-    limit: int = Query(default=50, ge=1, le=100, description="Cantidad de registros a retornar")
+    limit: int = Query(default=50, ge=1, le=100, description="Cantidad de registros a retornar"),
+    current_user: dict = Depends(require_admin)
 ):
     """
     Obtiene los registros de autenticación asociados a un clientId específico en la blockchain.
@@ -264,7 +274,7 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None))
                             distance = auth_res["distance"]
                             
                             effective_client_id = client_id or "LOCAL_AUTH"
-                            token = generate_idp_token(user_id=user_id, client_id=effective_client_id)
+                            token = generate_idp_token(user_id=user_id, client_id=effective_client_id, role=role)
                             
                             # Registrar en la blockchain
                             log_res = log_authentication(

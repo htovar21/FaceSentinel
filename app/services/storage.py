@@ -139,6 +139,33 @@ def get_oauth_client(client_id: str) -> Optional[dict]:
     return None
 
 
+def get_all_oauth_clients() -> list[dict]:
+    """
+    Retorna todas las aplicaciones de terceros registradas en el sistema.
+    """
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT client_id, redirect_uris, app_name, created_at FROM oauth_clients ORDER BY created_at DESC'
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    clients = []
+    for row in rows:
+        try:
+            uris = json.loads(row["redirect_uris"])
+        except (json.JSONDecodeError, TypeError):
+            uris = []
+        clients.append({
+            "client_id": row["client_id"],
+            "app_name": row["app_name"],
+            "redirect_uris": uris,
+            "created_at": row["created_at"]
+        })
+    return clients
+
+
 
 def save_user_data(user_id: str, name: str, role: str, face_vector: list):
     """Guarda al usuario en AMBAS bases de datos al mismo tiempo."""
