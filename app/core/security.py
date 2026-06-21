@@ -78,7 +78,7 @@ def verify_token(token: str) -> dict:
         HTTPException si el token es inválido o expirado
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], options={"verify_aud": False})
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(

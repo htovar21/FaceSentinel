@@ -567,28 +567,34 @@ export default function Login() {
                                                 <span className="col-span-1 text-right">Impacto</span>
                                             </div>
 
-                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.blink ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
+                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.blink?.value < 0.16 ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
                                                 <span className="col-span-1 font-semibold flex items-center gap-1">EAR</span>
-                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">{Number(livenessMetrics.blink?.value)?.toFixed(3)}</span>
-                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.blink?.threshold}</span>
+                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">
+                                                    {typeof livenessMetrics.blink?.value === 'number' ? livenessMetrics.blink.value.toFixed(3) : '0.000'}
+                                                </span>
+                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.blink?.threshold || '< 0.16'}</span>
                                                 <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Pre-req<br />Biométrico</span>
                                             </div>
 
                                             <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.texture?.value >= 4.75 ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
                                                 <span className="col-span-1 font-semibold flex items-center gap-1">LBP</span>
-                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">{Number(livenessMetrics.texture?.value)?.toFixed(3)}</span>
-                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold}</span>
+                                                <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">
+                                                    {typeof livenessMetrics.texture?.value === 'number' ? livenessMetrics.texture.value.toFixed(3) : '0.000'}
+                                                </span>
+                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold || '>= 4.75'}</span>
                                                 <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Densidad<br />Textura 3D</span>
                                             </div>
 
                                             <div className="grid grid-cols-4 gap-2 items-center p-3 rounded-md bg-muted/30 border-l-4 border-muted-foreground/30 opacity-60">
                                                 <span className="col-span-1 font-semibold flex items-center gap-1">FFT</span>
-                                                <span className="col-span-1 text-center font-mono text-sm tracking-tight">{livenessMetrics.frequency?.value ? Number(livenessMetrics.frequency?.value)?.toFixed(3) : 'N/A'}</span>
-                                                <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.threshold}</span>
+                                                <span className="col-span-1 text-center font-mono text-sm tracking-tight">
+                                                    {typeof livenessMetrics.frequency?.value === 'number' ? livenessMetrics.frequency.value.toFixed(3) : 'N/A'}
+                                                </span>
+                                                <span className="col-span-1 text-center font-mono">{livenessMetrics.frequency?.threshold || 'N/A'}</span>
                                                 <span className="col-span-1 text-right text-[10px] leading-tight">Bypass<br />(OLEDs)</span>
                                             </div>
 
-                                            {authDistance !== null && (
+                                            {typeof authDistance === 'number' && (
                                                 <div className="grid grid-cols-4 gap-2 items-center p-3 rounded-md bg-primary/10 border-l-4 border-primary mt-4 pt-3 shadow-sm transform scale-105 origin-left transition-all">
                                                     <span className="col-span-1 font-bold text-primary">ArcFace</span>
                                                     <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]">{authDistance.toFixed(4)}</span>

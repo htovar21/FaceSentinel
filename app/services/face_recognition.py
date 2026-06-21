@@ -131,8 +131,6 @@ def verify_face(image_data):
 
     logger.info(f"Candidato encontrado: {matched_id} | Distancia: {distance:.4f} | Umbral: {settings.FACE_MATCH_THRESHOLD}")
 
-    # Evaluación de Umbral (Threshold)
-    # En distancia Coseno, MÁS BAJO significa MÁS PARECIDO
     if distance < settings.FACE_MATCH_THRESHOLD:
         user_info = get_user_by_id(matched_id)
         if user_info:
@@ -146,13 +144,23 @@ def verify_face(image_data):
                 "distance": round(distance, 4)
             }
         else:
-            logger.error(f"Error: ID {matched_id} encontrado en ChromaDB pero no en SQLite")
-            return {"success": False, "message": "Error de sincronización de datos."}
+            logger.error(f"Error: ID {matched_id} encontrado en ChromaDB pero no en SQLite. Limpiando inconsistencia...")
+            try:
+                face_collection.delete(ids=[matched_id])
+                logger.info(f"🧹 Consistencia restaurada: ID {matched_id} eliminado de ChromaDB.")
+            except Exception as cleanup_err:
+                logger.error(f"Error al limpiar ID {matched_id} de ChromaDB: {cleanup_err}")
+            return {
+                "success": False,
+                "message": "Error de sincronización de datos.",
+                "distance": round(distance, 4)
+            }
     else:
         logger.warning(f"🚫 Acceso denegado: distancia {distance:.4f} > umbral {settings.FACE_MATCH_THRESHOLD}")
         return {
             "success": False,
-            "message": f"Acceso denegado. Rostro desconocido (Distancia: {distance:.2f})"
+            "message": f"Acceso denegado. Rostro desconocido (Distancia: {distance:.2f})",
+            "distance": round(distance, 4)
         }
 
 
@@ -161,7 +169,7 @@ def remove_face(user_id: str) -> dict:
     # 1. Eliminar datos en memoria ChromaDB
     try:
         face_collection.delete(
-            where={"user_id": user_id}
+            ids=[user_id]
         )
         logger.info(f"🗑️ Vectores biométricos eliminados para: {user_id}")
     except Exception as e:

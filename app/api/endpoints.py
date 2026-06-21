@@ -461,6 +461,7 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None))
                             await websocket.send_json({
                                 "status": "failed",
                                 "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
+                                "match_score": distance,
                                 "metrics": metrics_payload
                             })
                         # Romper el ciclo ya que el flujo termina (éxito o fallo biométrico)
