@@ -80,6 +80,7 @@ class TestBlockchainGracefulDegradation:
 
         result = log_authentication(
             user_id="TEST-001",
+            client_id="TEST-CLIENT",
             access_granted=True,
             device_id="TEST-DEVICE",
             match_score=0.35,

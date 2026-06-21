@@ -175,7 +175,7 @@ import cv2
 from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency
 
 @router.websocket("/ws/liveness")
-async def websocket_liveness(websocket: WebSocket):
+async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None)):
     """
     Endpoint interactivo que recibe frames de video en tiempo real,
     rastrea los ojos del usuario y detecta un parpadeo genuino.
@@ -250,16 +250,63 @@ async def websocket_liveness(websocket: WebSocket):
                             "weight": "Bypass (Deshabilitado para OLED)"
                         }
                     }
-
+ 
                     if texture_res.get("is_real") and freq_res.get("is_real"):
                         print(f"✅ Blink real. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
-                        await websocket.send_json({
-                            "status": "passed", 
-                            "message": "¡Prueba de vida superada! Analizando identidad...",
-                            "metrics": metrics_payload
-                        })
-                        # Romper el ciclo para no enviar múltiples señales de éxito 
-                        # que causen una condición de carrera en el Frontend / Blockchain
+                        
+                        # Ejecutar la verificación de identidad biométrica con ArcFace
+                        auth_res = verify_face(img_bgr)
+                        
+                        if auth_res.get("success"):
+                            user_id = auth_res["user_id"]
+                            user_name = auth_res["name"]
+                            role = auth_res["role"]
+                            distance = auth_res["distance"]
+                            
+                            effective_client_id = client_id or "LOCAL_AUTH"
+                            token = generate_idp_token(user_id=user_id, client_id=effective_client_id)
+                            
+                            # Registrar en la blockchain
+                            log_res = log_authentication(
+                                user_id=user_id,
+                                client_id=effective_client_id,
+                                embedding=None,
+                                access_granted=True,
+                                match_score=distance
+                            )
+                            tx_hash = log_res.get("tx_hash")
+                            
+                            await websocket.send_json({
+                                "status": "passed",
+                                "message": f"¡Identidad verificada! Bienvenido, {user_name}",
+                                "user_id": user_id,
+                                "user_name": user_name,
+                                "role": role,
+                                "token": token,
+                                "match_score": distance,
+                                "tx_hash": tx_hash,
+                                "metrics": metrics_payload
+                            })
+                        else:
+                            # Falla de autenticación: Rostro no reconocido o no coincide
+                            distance = auth_res.get("distance", 0.0)
+                            effective_client_id = client_id or "LOCAL_AUTH"
+                            
+                            # Registrar acceso denegado en la blockchain
+                            log_authentication(
+                                user_id="UNKNOWN",
+                                client_id=effective_client_id,
+                                embedding=None,
+                                access_granted=False,
+                                match_score=distance
+                            )
+                            
+                            await websocket.send_json({
+                                "status": "failed",
+                                "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
+                                "metrics": metrics_payload
+                            })
+                        # Romper el ciclo ya que el flujo termina (éxito o fallo biométrico)
                         break
                     else:
                         print(f"🚨 Spoofing detectado en blink. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")

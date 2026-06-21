@@ -42,6 +42,9 @@ export default function Login() {
             streamRef.current.getTracks().forEach(track => track.stop())
             streamRef.current = null
         }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null
+        }
     }, [])
 
     useEffect(() => {
@@ -87,7 +90,7 @@ export default function Login() {
         wsRef.current.send(JSON.stringify({ image_base64: base64Image }))
     }, [])
 
-    const handleAuthenticate = async (finalImageBase64: string) => {
+    /*const handleAuthenticate = async (finalImageBase64: string) => {
         setLoading(true)
         setError("")
         setLivenessMessage("Identificando usuario en Blockchain...")
@@ -159,7 +162,7 @@ export default function Login() {
         } finally {
             setLoading(false)
         }
-    }
+    }*/
 
     // Initialize WebRTC and WebSocket
     useEffect(() => {
@@ -167,7 +170,10 @@ export default function Login() {
             videoRef.current.srcObject = streamRef.current
 
             // Connect to WebSocket
-            const wsUrl = "ws://127.0.0.1:8000/api/v1/ws/liveness"
+            let wsUrl = "ws://127.0.0.1:8000/api/v1/ws/liveness"
+            if (clientId) {
+                wsUrl += `?client_id=${encodeURIComponent(clientId)}`
+            }
             const ws = new WebSocket(wsUrl)
             wsRef.current = ws
 
@@ -181,22 +187,54 @@ export default function Login() {
                 const data = JSON.parse(event.data)
 
                 if (data.status === "passed") {
-                    // Liveness passed! Stop streaming and capture HD frame for Auth
-                    if (intervalRef.current) clearInterval(intervalRef.current)
+                    // Liveness & ArcFace passed!
+                    stopCameraAndSocket()
                     setLivenessMessage(data.message)
                     setLivenessMetrics(data.metrics)
+                    setAuthDistance(data.match_score)
+                    localStorage.setItem("user_id", data.user_id || "")
+                    localStorage.setItem("user_name", data.user_name || "Usuario verificado")
+                    localStorage.setItem("role", data.role || "")
+                    setUserName(data.user_name || "Usuario verificado")
 
-                    // Capture high quality frame
-                    const canvas = canvasRef.current
-                    if (canvas && videoRef.current) {
-                        const ctx = canvas.getContext("2d")
-                        canvas.width = videoRef.current.videoWidth
-                        canvas.height = videoRef.current.videoHeight
-                        ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
-                        const capture = canvas.toDataURL("image/jpeg", 0.95)
+                    const token = data.token
 
-                        handleAuthenticate(capture)
+                    if (redirectUri && !token) {
+                        setError("Error fatal: No se emitió token de federación")
+                        setLivenessMessage("Error de seguridad")
+                        return
                     }
+
+                    if (token) {
+                        setIdpToken(token)
+                    }
+
+                    setStep("success")
+
+                    setTimeout(() => {
+                        if (redirectUri && token) {
+                            try {
+                                const url = new URL(redirectUri)
+                                if (url.hostname.includes("jwt.io")) {
+                                    url.hash = `token=${token}`
+                                } else {
+                                    url.searchParams.append("token", token)
+                                }
+                                window.location.href = url.toString()
+                            } catch (urlErr) {
+                                setError("Error al construir la URL de redirección")
+                            }
+                        } else {
+                            navigate("/dashboard")
+                        }
+                    }, 2000)
+                } else if (data.status === "failed") {
+                    // Biometric/auth failure - socket is closed by backend
+                    stopCameraAndSocket()
+                    setError(data.message || "Acceso denegado. Rostro desconocido.")
+                    setLivenessMessage("Autenticación biométrica fallida.")
+                    setLivenessMetrics(data.metrics)
+                    setAuthDistance(data.match_score || null)
                 } else if (data.status === "spoof_detected") {
                     // Stop tracking momentarily so user can read the warning
                     if (intervalRef.current) clearInterval(intervalRef.current)
@@ -216,15 +254,17 @@ export default function Login() {
                     setLivenessMessage(data.message)
                 } else if (data.status === "error") {
                     setError("Error del servidor: " + data.message)
+                    stopCameraAndSocket()
                 }
             }
 
             ws.onerror = () => {
                 setError("No se pudo conectar al motor de liveness.")
                 setLivenessMessage("Error de conexión WS")
+                stopCameraAndSocket()
             }
         }
-    }, [step, sendFrame])
+    }, [step, sendFrame, clientId, redirectUri, navigate, stopCameraAndSocket])
 
     return (
         <div className="flex h-screen w-full items-center justify-center bg-muted/40 p-4">
@@ -315,7 +355,7 @@ export default function Login() {
                                     </p>
                                 </div>
 
-                                <div className="w-full">
+                                <div className="w-full flex gap-2">
                                     <Button
                                         variant="outline"
                                         className="w-full"
@@ -324,6 +364,17 @@ export default function Login() {
                                     >
                                         Cancelar
                                     </Button>
+                                    {error && !intervalRef.current && (
+                                        <Button
+                                            className="w-full"
+                                            onClick={() => {
+                                                stopCameraAndSocket();
+                                                startCamera();
+                                            }}
+                                        >
+                                            Reintentar
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -339,10 +390,14 @@ export default function Login() {
                                 </div>
                                 <div className="mt-4 pt-2 w-full max-w-xs mx-auto text-center space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                     {redirectUri ? (
-                                        <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => { 
+                                        <Button size="lg" className="w-full shadow-lg border border-primary/20 hover:scale-105 transition-all group" onClick={() => {
                                             try {
                                                 const url = new URL(redirectUri)
-                                                url.searchParams.append("token", idpToken)
+                                                if (url.hostname.includes("jwt.io")) {
+                                                    url.hash = `token=${idpToken}`
+                                                } else {
+                                                    url.searchParams.append("token", idpToken)
+                                                }
                                                 window.location.href = url.toString()
                                             } catch (urlErr) {
                                                 setError("Error al construir la URL de redirección")
