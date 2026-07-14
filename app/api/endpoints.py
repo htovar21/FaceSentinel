@@ -332,7 +332,7 @@ import cv2
 from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency
 
 @router.websocket("/ws/liveness")
-async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None)):
+async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None), action: str = Query("authentication")):
     """
     Endpoint interactivo que recibe frames de video en tiempo real,
     rastrea los ojos del usuario y detecta un parpadeo genuino.
@@ -421,7 +421,13 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None))
                             distance = auth_res["distance"]
                             
                             effective_client_id = client_id or "LOCAL_AUTH"
-                            token = generate_idp_token(user_id=user_id, client_id=effective_client_id, role=role)
+                            token = generate_idp_token(
+                                user_id=user_id,
+                                client_id=effective_client_id,
+                                role=role,
+                                action=action,
+                                name=user_name
+                            )
                             
                             # Registrar en la blockchain
                             log_res = log_authentication(

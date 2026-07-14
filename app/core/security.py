@@ -92,7 +92,7 @@ def verify_token(token: str) -> dict:
         )
 
 
-def generate_idp_token(user_id: str, client_id: str, role: str = "user", expires_delta_minutes: int = 3) -> str:
+def generate_idp_token(user_id: str, client_id: str, role: str = "user", expires_delta_minutes: int = 3, action: str = None, name: str = None) -> str:
     """
     Genera un token JWT de federación (IdP) con una expiración muy corta.
     Incluye al usuario en el claim 'sub', al cliente de terceros en 'aud' y el rol en 'role'.
@@ -103,6 +103,10 @@ def generate_idp_token(user_id: str, client_id: str, role: str = "user", expires
         "iss": "facesentinel-idp",
         "role": role,
     }
+    if action:
+        payload["action"] = action
+    if name:
+        payload["name"] = name
     return create_access_token(data=payload, expires_delta=timedelta(minutes=expires_delta_minutes))
 
 

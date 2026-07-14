@@ -15,6 +15,7 @@ export default function Login() {
     const clientId = searchParams.get("client_id")
     const redirectUri = searchParams.get("redirect_uri")
     const appName = searchParams.get("app_name")
+    const action = searchParams.get("action") || "authentication"
 
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState("")
@@ -234,8 +235,12 @@ export default function Login() {
 
             // Connect to WebSocket
             let wsUrl = "ws://127.0.0.1:8000/api/v1/ws/liveness"
-            if (clientId) {
-                wsUrl += `?client_id=${encodeURIComponent(clientId)}`
+            const wsParams = new URLSearchParams()
+            if (clientId) wsParams.append("client_id", clientId)
+            if (action) wsParams.append("action", action)
+            const queryString = wsParams.toString()
+            if (queryString) {
+                wsUrl += `?${queryString}`
             }
             const ws = new WebSocket(wsUrl)
             wsRef.current = ws
@@ -328,7 +333,7 @@ export default function Login() {
                 stopCameraAndSocket()
             }
         }
-    }, [step, sendFrame, clientId, redirectUri, navigate, stopCameraAndSocket])
+    }, [step, sendFrame, clientId, redirectUri, action, navigate, stopCameraAndSocket])
 
     return (
         <div className="flex h-screen w-full items-center justify-center bg-muted/40 p-4">

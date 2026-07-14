@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -9,12 +9,35 @@ import axios from "axios"
 
 export default function Signup() {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
+
+    // Extract query parameters for federated signup
+    const clientId = searchParams.get("client_id")
+    const redirectUri = searchParams.get("redirect_uri")
+    const urlUserId = searchParams.get("user_id")
+    const urlName = searchParams.get("name")
+
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState("")
     const [step, setStep] = useState<"form" | "camera" | "success">("form")
 
     // Data State
-    const [formData, setFormData] = useState({ id: "", name: "", role: "Student" })
+    const [formData, setFormData] = useState({
+        id: urlUserId || "",
+        name: urlName || "",
+        role: "Student"
+    })
+
+    // Sync state if url parameters change
+    useEffect(() => {
+        if (urlUserId || urlName) {
+            setFormData(prev => ({
+                ...prev,
+                id: urlUserId || prev.id,
+                name: urlName || prev.name
+            }));
+        }
+    }, [urlUserId, urlName])
 
     const videoRef = useRef<HTMLVideoElement>(null)
     const [stream, setStream] = useState<MediaStream | null>(null)
@@ -85,7 +108,11 @@ export default function Signup() {
                 stopCamera()
                 setStep("success")
                 setTimeout(() => {
-                    navigate("/")
+                    if (clientId && redirectUri) {
+                        navigate(`/?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&action=enrollment`)
+                    } else {
+                        navigate("/")
+                    }
                 }, 3000)
             } else {
                 setError(response.data.message || "Registro fallido")
@@ -215,7 +242,13 @@ export default function Signup() {
                                 <h3 className="text-xl font-semibold">¡Todo listo!</h3>
                                 <p className="text-muted-foreground">Tu perfil ha sido registrado con seguridad blockchain.</p>
                             </div>
-                            <Button className="w-full mt-4" onClick={() => navigate("/")}>
+                            <Button className="w-full mt-4" onClick={() => {
+                                if (clientId && redirectUri) {
+                                    navigate(`/?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&action=enrollment`)
+                                } else {
+                                    navigate("/")
+                                }
+                            }}>
                                 Ir al Inicio de Sesión
                             </Button>
                         </div>
