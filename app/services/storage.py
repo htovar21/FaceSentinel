@@ -84,10 +84,15 @@ def init_sqlite():
             match_score REAL,
             device_id TEXT,
             tx_hash TEXT,
+            client_id TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+    try:
+        cursor.execute("ALTER TABLE access_logs ADD COLUMN client_id TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     # Tabla de clientes OAuth/SSO registrados
     cursor.execute('''
@@ -262,18 +267,92 @@ def get_all_users():
 
 
 def save_access_log(user_id: str, access_granted: bool, match_score: float = None,
-                    device_id: str = None, tx_hash: str = None):
+                    device_id: str = None, tx_hash: str = None, client_id: str = None):
     """Guarda un registro de acceso local (respaldo de la blockchain)."""
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'INSERT INTO access_logs (user_id, access_granted, match_score, device_id, tx_hash) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (user_id, access_granted, match_score, device_id, tx_hash)
+        'INSERT INTO access_logs (user_id, access_granted, match_score, device_id, tx_hash, client_id) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (user_id, access_granted, match_score, device_id, tx_hash, client_id)
     )
     conn.commit()
     conn.close()
     logger.debug(f"📝 Log de acceso guardado para {user_id}")
+
+
+def get_local_client_logs(client_id: str, limit: int = 50) -> dict:
+    """Obtiene los registros de acceso locales para un cliente."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT user_id, access_granted, match_score, device_id, tx_hash, timestamp '
+        'FROM access_logs WHERE client_id = ? ORDER BY timestamp DESC LIMIT ?',
+        (client_id, limit)
+    )
+    records = []
+    import calendar
+    from datetime import datetime
+    import time
+    for row in cursor.fetchall():
+        ts = row["timestamp"]
+        if isinstance(ts, str):
+            try:
+                dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                epoch = calendar.timegm(dt.utctimetuple())
+            except Exception:
+                epoch = int(time.time())
+        else:
+            epoch = int(ts) if ts else int(time.time())
+
+        records.append({
+            "user_id": row["user_id"],
+            "biometric_hash": row["tx_hash"] if row["tx_hash"] else "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "timestamp": epoch,
+            "access_granted": bool(row["access_granted"]),
+            "device_id": row["device_id"] or "API-SERVER-01",
+            "match_score": row["match_score"] or 0.0,
+            "client_id": client_id
+        })
+    conn.close()
+    return {"success": True, "client_id": client_id, "records": records}
+
+
+def get_local_user_auth_history(user_id: str, limit: int = 10) -> dict:
+    """Obtiene el historial de accesos de un usuario desde la DB local."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT user_id, access_granted, match_score, device_id, tx_hash, timestamp, client_id '
+        'FROM access_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?',
+        (user_id, limit)
+    )
+    records = []
+    import calendar
+    from datetime import datetime
+    import time
+    for row in cursor.fetchall():
+        ts = row["timestamp"]
+        if isinstance(ts, str):
+            try:
+                dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                epoch = calendar.timegm(dt.utctimetuple())
+            except Exception:
+                epoch = int(time.time())
+        else:
+            epoch = int(ts) if ts else int(time.time())
+
+        records.append({
+            "user_id": row["user_id"],
+            "biometric_hash": row["tx_hash"] if row["tx_hash"] else "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "timestamp": epoch,
+            "access_granted": bool(row["access_granted"]),
+            "device_id": row["device_id"] or "API-SERVER-01",
+            "match_score": row["match_score"] or 0.0,
+            "client_id": row["client_id"] or "LOCAL_AUTH"
+        })
+    conn.close()
+    return {"success": True, "user_id": user_id, "records": records}
 
 
 def get_user_count() -> int:

@@ -44,15 +44,23 @@ export default function Dashboard() {
             .then(r => setDbStatus(r.data))
             .catch(() => setDbStatus({ status: "offline", blockchain: "disconnected" }))
 
-        // Cargar historial de acceso
-        axios.get(`${baseUrl}/api/v1/auth-history/${userId}?limit=50`)
-            .then(r => {
-                if (r.data.success && r.data.records) {
-                    setAuthHistory(r.data.records)
-                }
+        // Cargar historial de acceso (solo para admin)
+        const roleLower = userRole.toLowerCase()
+        if (roleLower === "admin") {
+            const token = localStorage.getItem("token") || ""
+            axios.get(`${baseUrl}/api/v1/auth-history/${userId}?limit=50`, {
+                headers: { Authorization: `Bearer ${token}` }
             })
-            .catch(err => console.error("Error cargando historial", err))
-            .finally(() => setHistoryLoading(false))
+                .then(r => {
+                    if (r.data.success && r.data.records) {
+                        setAuthHistory(r.data.records)
+                    }
+                })
+                .catch(err => console.error("Error cargando historial", err))
+                .finally(() => setHistoryLoading(false))
+        } else {
+            setHistoryLoading(false)
+        }
     }, [userId, navigate])
 
     const handleLogout = () => {

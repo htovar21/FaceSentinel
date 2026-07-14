@@ -251,17 +251,24 @@ def delete_user_account(user_id: str):
 @router.get("/auth-history/{user_id}", tags=["Blockchain"])
 def get_user_auth_history(
     user_id: str,
-    limit: int = Query(default=10, ge=1, le=100, alias="limit", description="Cantidad de registros a retornar")
+    limit: int = Query(default=10, ge=1, le=100, alias="limit", description="Cantidad de registros a retornar"),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Consulta el historial de autenticaciones de un usuario en la blockchain.
+    Consulta el historial de autenticaciones de un usuario en la blockchain (o SQLite local).
     Retorna los registros más recientes, inmutables y verificables.
     """
-    if not is_blockchain_available():
+    # Restricción estricta de Roles (RBAC - Solo Admin)
+    user_role = current_user.get("role", "").lower()
+    if user_role != "admin":
         raise HTTPException(
-            status_code=503,
-            detail="Blockchain no disponible. Verifica que Ganache esté corriendo."
+            status_code=403,
+            detail="Acceso denegado. Rol no autorizado para ver historiales de acceso."
         )
+
+    if not is_blockchain_available():
+        from app.services.storage import get_local_user_auth_history
+        return get_local_user_auth_history(user_id, limit)
     
     history = get_auth_history(user_id, limit)
     
@@ -278,15 +285,9 @@ def get_client_logs(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Obtiene los registros de autenticación asociados a un clientId específico en la blockchain.
+    Obtiene los registros de autenticación asociados a un clientId específico en la blockchain (o SQLite local).
     """
-    if not is_blockchain_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Blockchain no disponible. Verifica que Ganache esté corriendo."
-        )
-        
-    # Validar permisos (IDOR Protection)
+    # Validar permisos (IDOR Protection & RBAC)
     user_role = current_user.get("role", "").lower()
     user_id = current_user.get("sub")
     
@@ -304,6 +305,10 @@ def get_client_logs(
             status_code=403,
             detail="Acceso denegado. Rol no autorizado para ver logs de aplicaciones."
         )
+
+    if not is_blockchain_available():
+        from app.services.storage import get_local_client_logs
+        return get_local_client_logs(client_id, limit)
     
     logs = get_recent_records_by_client(client_id, limit)
     

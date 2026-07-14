@@ -146,6 +146,18 @@ def log_authentication(
     """
     if not is_blockchain_available():
         logger.warning("Blockchain no disponible. Evento no registrado en cadena.")
+        try:
+            from app.services.storage import save_access_log
+            save_access_log(
+                user_id=user_id,
+                access_granted=access_granted,
+                match_score=match_score,
+                device_id=device_id,
+                tx_hash=None,
+                client_id=client_id
+            )
+        except Exception as sqle:
+            logger.error(f"Error al guardar log de acceso en SQLite: {sqle}")
         return {"success": False, "message": "Blockchain no disponible", "tx_hash": None}
 
     try:
@@ -199,6 +211,19 @@ def log_authentication(
             f"TX: {tx_hash_hex} | Usuario: {user_id} | "
             f"Acceso: {'✅' if access_granted else '❌'}"
         )
+
+        try:
+            from app.services.storage import save_access_log
+            save_access_log(
+                user_id=user_id,
+                access_granted=access_granted,
+                match_score=match_score,
+                device_id=device_id,
+                tx_hash=tx_hash_hex,
+                client_id=client_id
+            )
+        except Exception as sqle:
+            logger.error(f"Error al guardar log de acceso en SQLite: {sqle}")
 
         return {
             "success": True,
