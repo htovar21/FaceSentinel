@@ -516,13 +516,17 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
 from fastapi.responses import JSONResponse
 
 @router.post("/physical-access/authenticate", tags=["Acceso Físico"])
-def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
+def physical_access_authenticate(
+    payload: M2MAuthRequest,
+    request: Request,
+    background_tasks: BackgroundTasks
+):
     """
     Endpoint dedicado a dispositivos físicos M2M.
     Valida token, realiza control de vida (liveness),
     extrae embedding y realiza verificación facial contra ChromaDB y SQLite,
     verifica los permisos del dispositivo (ACL/RBAC),
-    y registra el evento en la blockchain de manera inmutable.
+    y registra el evento en la blockchain de manera inmutable (en segundo plano).
     """
     # 1. Autenticación M2M vía cabecera Authorization: Bearer <device_secret>
     auth_header = request.headers.get("Authorization")
@@ -562,8 +566,9 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
     try:
         liveness_res = comprehensive_liveness_check(img_bgr)
         if not liveness_res.get("is_live"):
-            # Registrar intento fallido por liveness en blockchain
-            log_authentication(
+            # Registrar intento fallido por liveness en blockchain en segundo plano
+            background_tasks.add_task(
+                log_authentication,
                 user_id="UNKNOWN",
                 client_id="PHYSICAL_ACCESS",
                 embedding=None,
@@ -595,8 +600,9 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
         )
 
     if not auth_res.get("success"):
-        # Registrar intento de acceso fallido
-        log_authentication(
+        # Registrar intento de acceso fallido en segundo plano
+        background_tasks.add_task(
+            log_authentication,
             user_id="UNKNOWN",
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -615,8 +621,9 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
     # 5. Control de Acceso (RBAC/ACL)
     user = get_user_by_id(user_id)
     if not user:
-        # Registrar intento fallido (usuario existe en ChromaDB pero no en SQLite)
-        log_authentication(
+        # Registrar intento fallido en segundo plano
+        background_tasks.add_task(
+            log_authentication,
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -636,8 +643,9 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
     )
 
     if not has_access:
-        # Registrar intento fallido por falta de permisos
-        log_authentication(
+        # Registrar intento fallido por falta de permisos en segundo plano
+        background_tasks.add_task(
+            log_authentication,
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -650,22 +658,18 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
             detail="Acceso denegado a esta zona"
         )
 
-    # 6. Generar log inmutable de Éxito en Blockchain y SQLite local
-    try:
-        log_res = log_authentication(
-            user_id=user_id,
-            client_id="PHYSICAL_ACCESS",
-            embedding=None,
-            access_granted=True,
-            device_id=device["device_id"],
-            match_score=distance
-        )
-        tx_hash = log_res.get("tx_hash") or "0x0000000000000000000000000000000000000000000000000000000000000000"
-    except Exception as e:
-        logger.error(f"Error al registrar autenticación en blockchain: {e}")
-        tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000000"
+    # 6. Generar log inmutable de Éxito en Blockchain y SQLite en segundo plano (asíncrono)
+    background_tasks.add_task(
+        log_authentication,
+        user_id=user_id,
+        client_id="PHYSICAL_ACCESS",
+        embedding=None,
+        access_granted=True,
+        device_id=device["device_id"],
+        match_score=distance
+    )
 
-    # 7. Respuesta exitosa
+    # 7. Respuesta exitosa inmediata
     return {
         "status": "success",
         "authorization": "GRANTED",
@@ -674,5 +678,5 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
             "name": user["name"],
             "role": user["role"]
         },
-        "blockchain_tx": tx_hash
+        "blockchain_tx": "PENDING_COMMIT"
     }
