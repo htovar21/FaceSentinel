@@ -98,4 +98,13 @@ class PasswordChangeRequest(BaseModel):
 
 class BiometricsEnrollRequest(BaseModel):
     """Modelo para enrolar la biometría facial del usuario logueado."""
+    image_base64: str
+
+
+# =========================================================================
+#                   SCHEMAS M2M (Acceso Físico)
+# =========================================================================
+
+class M2MAuthRequest(BaseModel):
+    """Modelo para la petición de autenticación desde el Edge Gateway (M2M)."""
     image_base64: str

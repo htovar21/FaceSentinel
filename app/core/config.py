@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Seguridad — Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 30
 
+    # Seguridad M2M (Acceso Físico)
+    HW_CLIENT_SECRET: str = "secret_door_01"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

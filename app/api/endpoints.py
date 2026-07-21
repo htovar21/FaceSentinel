@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -9,6 +9,7 @@ from app.api.schemas import (
     PasswordAuthRequest,
     PasswordChangeRequest,
     BiometricsEnrollRequest,
+    M2MAuthRequest,
 )
 import secrets
 from app.services.storage import (
@@ -334,7 +335,7 @@ def blockchain_status():
 
 import json
 import cv2
-from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency
+from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency, comprehensive_liveness_check
 
 @router.websocket("/ws/liveness")
 async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None), action: str = Query("authentication")):
@@ -501,3 +502,154 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
         print("Cliente de WebSocket desconectado de Liveness")
     except Exception as e:
         print(f"Excepción inesperada en WebSocket: {e}")
+
+
+# =========================================================================
+#            M2M ENDPOINT PARA ACCESO FÍSICO (DISPOSITIVOS IOT)
+# =========================================================================
+
+from fastapi.responses import JSONResponse
+
+@router.post("/physical-access/authenticate", tags=["Acceso Físico"])
+def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
+    """
+    Endpoint dedicado a dispositivos físicos M2M.
+    Valida token, realiza control de vida (liveness),
+    extrae embedding y realiza verificación facial contra ChromaDB y SQLite,
+    y registra el evento en la blockchain de manera inmutable.
+    """
+    # 1. Autenticación M2M vía cabecera Authorization: Bearer <device_secret>
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "authorization": "DENIED",
+                "detail": "Cabecera Authorization Bearer faltante o mal formada."
+            }
+        )
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "authorization": "DENIED",
+                "detail": "Cabecera Authorization Bearer mal formada."
+            }
+        )
+        
+    device_secret = parts[1]
+    if device_secret != settings.HW_CLIENT_SECRET:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "authorization": "DENIED",
+                "detail": "Token de dispositivo incorrecto o no autorizado."
+            }
+        )
+
+    # 2. Decodificar imagen base64
+    try:
+        img_bgr = base64_to_image(payload.image_base64)
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "authorization": "DENIED",
+                "detail": f"Error decodificando imagen: {str(e)}"
+            }
+        )
+
+    # 3. Validación de Liveness (Anti-Spoofing) en una sola imagen (LBP + FFT)
+    try:
+        liveness_res = comprehensive_liveness_check(img_bgr)
+        if not liveness_res.get("is_live"):
+            # Registrar intento fallido por liveness en blockchain
+            log_authentication(
+                user_id="UNKNOWN",
+                client_id="PHYSICAL_ACCESS",
+                embedding=None,
+                access_granted=False,
+                device_id="PHYSICAL-GATEWAY",
+                match_score=0.0
+            )
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={
+                    "authorization": "DENIED",
+                    "detail": f"Acceso denegado. Liveness fallido: {liveness_res.get('reason')}"
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error en validación liveness: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "authorization": "DENIED",
+                "detail": "Error durante la validación de Liveness."
+            }
+        )
+
+    # 4. Extraer embedding y buscar en ChromaDB
+    try:
+        auth_res = verify_face(img_bgr)
+    except Exception as e:
+        logger.error(f"Error en verificación facial: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "authorization": "DENIED",
+                "detail": "Error en el motor de reconocimiento facial."
+            }
+        )
+
+    if not auth_res.get("success"):
+        # Registrar intento de acceso fallido
+        log_authentication(
+            user_id="UNKNOWN",
+            client_id="PHYSICAL_ACCESS",
+            embedding=None,
+            access_granted=False,
+            device_id="PHYSICAL-GATEWAY",
+            match_score=auth_res.get("distance", 0.0)
+        )
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "authorization": "DENIED",
+                "detail": auth_res.get("message", "Acceso denegado. Rostro desconocido.")
+            }
+        )
+
+    # 5. Generar log inmutable en Blockchain
+    try:
+        user_id = auth_res["user_id"]
+        user_name = auth_res["name"]
+        role = auth_res["role"]
+        distance = auth_res["distance"]
+        
+        log_res = log_authentication(
+            user_id=user_id,
+            client_id="PHYSICAL_ACCESS",
+            embedding=None,
+            access_granted=True,
+            device_id="PHYSICAL-GATEWAY",
+            match_score=distance
+        )
+        tx_hash = log_res.get("tx_hash") or "0x0000000000000000000000000000000000000000000000000000000000000000"
+    except Exception as e:
+        logger.error(f"Error al registrar autenticación en blockchain: {e}")
+        tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+    # 6. Respuesta exitosa
+    return {
+        "status": "success",
+        "authorization": "GRANTED",
+        "user": {
+            "id": user_id,
+            "name": user_name,
+            "role": role
+        },
+        "blockchain_tx": tx_hash
+    }
