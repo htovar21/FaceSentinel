@@ -107,4 +107,18 @@ class BiometricsEnrollRequest(BaseModel):
 
 class M2MAuthRequest(BaseModel):
     """Modelo para la petición de autenticación desde el Edge Gateway (M2M)."""
-    image_base64: str = Field(..., description="Imagen del rostro recortado en formato Base64")
+    image_base64: str = Field(..., description="Imagen del rostro recortado en formato Base64")
+
+
+class IoTDeviceCreate(BaseModel):
+    """Modelo para registrar un nuevo dispositivo IoT."""
+    device_id: str = Field(..., description="Identificador único del dispositivo de hardware")
+    device_name: str = Field(..., description="Nombre descriptivo del punto de acceso")
+    device_type: str = Field("door", description="Tipo de hardware (door, camera, turnstile, gateway)")
+    location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
+
+
+class ACLRuleCreate(BaseModel):
+    """Modelo para asociar reglas de acceso (ACL/RBAC) a un dispositivo."""
+    user_id: Optional[str] = Field(None, description="ID del usuario específico (Cédula)")
+    allowed_role: Optional[str] = Field(None, description="Rol con permiso de acceso general (Student, Professor, etc.)")

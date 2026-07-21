@@ -11,6 +11,8 @@ from app.api.schemas import (
     PasswordChangeRequest,
     BiometricsEnrollRequest,
     M2MAuthRequest,
+    IoTDeviceCreate,
+    ACLRuleCreate,
 )
 import secrets
 from app.services.storage import (
@@ -24,6 +26,13 @@ from app.services.storage import (
     save_user_data,
     get_device_by_token,
     verify_device_access,
+    get_all_users,
+    save_iot_device,
+    delete_iot_device,
+    get_device_acl_rules,
+    save_acl_rule,
+    delete_acl_rule,
+    get_all_devices,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +106,15 @@ def list_oauth_clients(current_user: dict = Depends(require_admin)):
     (Sólo disponible para Administradores).
     """
     return get_all_oauth_clients()
+
+
+@router.get("/users", tags=["Autenticación y Registro"])
+def list_users(current_user: dict = Depends(require_admin)):
+    """
+    Lista todos los usuarios registrados en el IdP.
+    (Sólo disponible para Administradores).
+    """
+    return get_all_users()
 
 
 @router.post("/auth/password", tags=["Autenticación y Registro"])
@@ -669,7 +687,7 @@ def physical_access_authenticate(
         match_score=distance
     )
 
-    # 7. Respuesta exitosa inmediata
+    # 7. Respuesta exitosa
     return {
         "status": "success",
         "authorization": "GRANTED",
@@ -680,3 +698,104 @@ def physical_access_authenticate(
         },
         "blockchain_tx": "PENDING_COMMIT"
     }
+
+
+# =========================================================================
+#            GESTIÓN DE DISPOSITIVOS IOT Y ACLS (ADMINISTRADOR)
+# =========================================================================
+
+@router.get("/devices", tags=["Acceso Físico"])
+def get_devices(current_user: dict = Depends(require_admin)):
+    """Lista todos los dispositivos IoT registrados (Solo Administrador)"""
+    return get_all_devices()
+
+
+@router.post("/devices", tags=["Acceso Físico"])
+def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(require_admin)):
+    """
+    Registra un nuevo dispositivo físico en SQLite.
+    Genera y retorna un token de hardware único en texto plano.
+    """
+    # Generar token de hardware único y aleatorio
+    client_secret = f"hw_{secrets.token_urlsafe(32)}"
+    
+    # Hashear el token para almacenamiento en base de datos
+    secret_hash = hash_client_secret(client_secret)
+    
+    success = save_iot_device(
+        device_id=device_data.device_id,
+        device_name=device_data.device_name,
+        device_type=device_data.device_type,
+        location=device_data.location,
+        client_secret_hash=secret_hash,
+        is_active=True
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo registrar el dispositivo en la base de datos."
+        )
+        
+    return {
+        "device_id": device_data.device_id,
+        "device_name": device_data.device_name,
+        "device_type": device_data.device_type,
+        "location": device_data.location,
+        "client_secret": client_secret  # Se retorna una sola vez en texto plano
+    }
+
+
+@router.delete("/devices/{device_id}", tags=["Acceso Físico"])
+def remove_device(device_id: str, current_user: dict = Depends(require_admin)):
+    """Elimina un dispositivo IoT registrado (Solo Administrador)"""
+    success = delete_iot_device(device_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dispositivo no encontrado o no se pudo eliminar."
+        )
+    return {"success": True, "message": f"Dispositivo '{device_id}' eliminado con éxito."}
+
+
+@router.get("/devices/{device_id}/acl", tags=["Acceso Físico"])
+def get_device_acl(device_id: str, current_user: dict = Depends(require_admin)):
+    """Lista las reglas de acceso (ACL/RBAC) configuradas para un dispositivo (Solo Administrador)"""
+    return get_device_acl_rules(device_id)
+
+
+@router.post("/devices/{device_id}/acl", tags=["Acceso Físico"])
+def add_device_acl(device_id: str, acl_data: ACLRuleCreate, current_user: dict = Depends(require_admin)):
+    """Asocia una nueva regla de acceso (ACL/RBAC) a un dispositivo (Solo Administrador)"""
+    if not acl_data.user_id and not acl_data.allowed_role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe proporcionar al menos un user_id (ACL) o allowed_role (RBAC)."
+        )
+        
+    success = save_acl_rule(
+        device_id=device_id,
+        user_id=acl_data.user_id,
+        allowed_role=acl_data.allowed_role,
+        schedule_rule=None
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo registrar la regla de acceso en la base de datos."
+        )
+        
+    return {"success": True, "message": "Regla de acceso registrada con éxito."}
+
+
+@router.delete("/devices/acl/{rule_id}", tags=["Acceso Físico"])
+def remove_device_acl(rule_id: int, current_user: dict = Depends(require_admin)):
+    """Elimina una regla de acceso ACL/RBAC por su ID (Solo Administrador)"""
+    success = delete_acl_rule(rule_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Regla de acceso no encontrada o no se pudo eliminar."
+        )
+    return {"success": True, "message": "Regla de acceso eliminada con éxito."}

@@ -663,6 +663,40 @@ def verify_device_access(device_id: str, user_id: str, user_role: str) -> bool:
         return rule is not None
 
 
+def get_all_devices() -> list[dict]:
+    """Retorna todos los dispositivos IoT registrados."""
+    with SessionLocal() as session:
+        stmt = select(IoTDevice).order_by(IoTDevice.created_at.desc())
+        devices = session.scalars(stmt).all()
+        return [
+            {
+                "device_id": d.device_id,
+                "device_name": d.device_name,
+                "device_type": d.device_type,
+                "location": d.location,
+                "is_active": d.is_active,
+                "created_at": d.created_at
+            }
+            for d in devices
+        ]
+
+
+def delete_acl_rule(rule_id: int) -> bool:
+    """Elimina una regla ACL por su ID."""
+    with SessionLocal() as session:
+        rule = session.get(AccessControlList, rule_id)
+        if rule:
+            try:
+                session.delete(rule)
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                logger.error(f"❌ Error al eliminar regla ACL: {e}")
+                return False
+        return False
+
+
 # Ejecutar la creación de tablas al importar este módulo
 init_sqlite()
 logger.info("✅ Bases de datos listas y conectadas.")
