@@ -17,7 +17,7 @@ import threading
 #                     CONFIGURACIONES DEL GATEWAY
 # =========================================================================
 API_URL = os.environ.get("FACESENTINEL_M2M_URL", "http://localhost:8000/api/v1/physical-access/authenticate")
-DEVICE_TOKEN = os.environ.get("HW_CLIENT_SECRET", "hw_RZI-TIx6T-nLeXRsXXxCBZj5UI1-l9rcvqZBJIKF0Xg")
+DEVICE_TOKEN = os.environ.get("HW_CLIENT_SECRET", "hw_Y1lW8PS-T1B6q1GhV4Iw5XroMtSjkv2XTpxEVf0NvtY")
 
 WEBCAM_INDEX = 0             # Índice de la cámara
 MIN_DETECTION_CONF = 0.6      # Umbral de confianza de detección de MediaPipe (evita falsos positivos como manos)
