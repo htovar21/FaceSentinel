@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request, BackgroundTasks
+import logging
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -21,7 +22,11 @@ from app.services.storage import (
     update_user_password,
     get_user_by_id,
     save_user_data,
+    get_device_by_token,
+    verify_device_access,
 )
+
+logger = logging.getLogger(__name__)
 from app.core.security import (
     hash_client_secret,
     generate_idp_token,
@@ -516,49 +521,41 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
     Endpoint dedicado a dispositivos físicos M2M.
     Valida token, realiza control de vida (liveness),
     extrae embedding y realiza verificación facial contra ChromaDB y SQLite,
+    verifica los permisos del dispositivo (ACL/RBAC),
     y registra el evento en la blockchain de manera inmutable.
     """
     # 1. Autenticación M2M vía cabecera Authorization: Bearer <device_secret>
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "authorization": "DENIED",
-                "detail": "Cabecera Authorization Bearer faltante o mal formada."
-            }
+            detail="Cabecera Authorization Bearer faltante o mal formada."
         )
     
     parts = auth_header.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "authorization": "DENIED",
-                "detail": "Cabecera Authorization Bearer mal formada."
-            }
+            detail="Cabecera Authorization Bearer mal formada."
         )
         
     device_secret = parts[1]
-    if device_secret != settings.HW_CLIENT_SECRET:
-        return JSONResponse(
+    
+    # Buscar dispositivo por token/secreto en SQLite
+    device = get_device_by_token(device_secret)
+    if not device:
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "authorization": "DENIED",
-                "detail": "Token de dispositivo incorrecto o no autorizado."
-            }
+            detail="Token de dispositivo incorrecto o no autorizado."
         )
 
     # 2. Decodificar imagen base64
     try:
         img_bgr = base64_to_image(payload.image_base64)
     except Exception as e:
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "authorization": "DENIED",
-                "detail": f"Error decodificando imagen: {str(e)}"
-            }
+            detail=f"Error decodificando imagen: {str(e)}"
         )
 
     # 3. Validación de Liveness (Anti-Spoofing) en una sola imagen (LBP + FFT)
@@ -571,24 +568,20 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
                 client_id="PHYSICAL_ACCESS",
                 embedding=None,
                 access_granted=False,
-                device_id="PHYSICAL-GATEWAY",
+                device_id=device["device_id"],
                 match_score=0.0
             )
-            return JSONResponse(
+            raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={
-                    "authorization": "DENIED",
-                    "detail": f"Acceso denegado. Liveness fallido: {liveness_res.get('reason')}"
-                }
+                detail="Spoofing detectado"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error en validación liveness: {e}")
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            content={
-                "authorization": "DENIED",
-                "detail": "Error durante la validación de Liveness."
-            }
+            detail="Error durante la validación de Liveness."
         )
 
     # 4. Extraer embedding y buscar en ChromaDB
@@ -596,12 +589,9 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
         auth_res = verify_face(img_bgr)
     except Exception as e:
         logger.error(f"Error en verificación facial: {e}")
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "authorization": "DENIED",
-                "detail": "Error en el motor de reconocimiento facial."
-            }
+            detail="Error en el motor de reconocimiento facial."
         )
 
     if not auth_res.get("success"):
@@ -611,30 +601,63 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
             client_id="PHYSICAL_ACCESS",
             embedding=None,
             access_granted=False,
-            device_id="PHYSICAL-GATEWAY",
+            device_id=device["device_id"],
             match_score=auth_res.get("distance", 0.0)
         )
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "authorization": "DENIED",
-                "detail": auth_res.get("message", "Acceso denegado. Rostro desconocido.")
-            }
+            detail=auth_res.get("message", "Acceso denegado. Rostro desconocido.")
         )
 
-    # 5. Generar log inmutable en Blockchain
+    user_id = auth_res["user_id"]
+    distance = auth_res["distance"]
+
+    # 5. Control de Acceso (RBAC/ACL)
+    user = get_user_by_id(user_id)
+    if not user:
+        # Registrar intento fallido (usuario existe en ChromaDB pero no en SQLite)
+        log_authentication(
+            user_id=user_id,
+            client_id="PHYSICAL_ACCESS",
+            embedding=None,
+            access_granted=False,
+            device_id=device["device_id"],
+            match_score=distance
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no encontrado en la base de datos relacional."
+        )
+
+    has_access = verify_device_access(
+        device_id=device["device_id"],
+        user_id=user_id,
+        user_role=user["role"]
+    )
+
+    if not has_access:
+        # Registrar intento fallido por falta de permisos
+        log_authentication(
+            user_id=user_id,
+            client_id="PHYSICAL_ACCESS",
+            embedding=None,
+            access_granted=False,
+            device_id=device["device_id"],
+            match_score=distance
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado a esta zona"
+        )
+
+    # 6. Generar log inmutable de Éxito en Blockchain y SQLite local
     try:
-        user_id = auth_res["user_id"]
-        user_name = auth_res["name"]
-        role = auth_res["role"]
-        distance = auth_res["distance"]
-        
         log_res = log_authentication(
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
             access_granted=True,
-            device_id="PHYSICAL-GATEWAY",
+            device_id=device["device_id"],
             match_score=distance
         )
         tx_hash = log_res.get("tx_hash") or "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -642,14 +665,14 @@ def physical_access_authenticate(payload: M2MAuthRequest, request: Request):
         logger.error(f"Error al registrar autenticación en blockchain: {e}")
         tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000000"
 
-    # 6. Respuesta exitosa
+    # 7. Respuesta exitosa
     return {
         "status": "success",
         "authorization": "GRANTED",
         "user": {
             "id": user_id,
-            "name": user_name,
-            "role": role
+            "name": user["name"],
+            "role": user["role"]
         },
         "blockchain_tx": tx_hash
     }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 # =========================================================================
@@ -107,4 +107,4 @@ class BiometricsEnrollRequest(BaseModel):
 
 class M2MAuthRequest(BaseModel):
     """Modelo para la petición de autenticación desde el Edge Gateway (M2M)."""
-    image_base64: str
+    image_base64: str = Field(..., description="Imagen del rostro recortado en formato Base64")

@@ -9,6 +9,7 @@ protobuf==3.20.3      # EL ESCUDO: Mantiene la paz entre MediaPipe y TensorFlow
 
 # --- Bases de Datos (Vectorial y Relacional) ---
 chromadb>=0.4.22      # Base de datos vectorial local para guardar los embeddings
+sqlalchemy>=2.0.0     # ORM para bases de datos relacionales
 
 # --- Backend y API ---
 fastapi>=0.109.0      # Framework para crear la API del sistema
