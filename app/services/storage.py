@@ -628,24 +628,25 @@ def get_device_acl_rules(device_id: str) -> List[dict]:
 
 
 def get_device_by_token(token: str) -> Optional[dict]:
-    """Busca en IoTDevice donde client_secret_hash == token y is_active == True."""
+    """Busca en IoTDevice validando el token en texto plano contra su hash bcrypt y is_active == True."""
+    from app.core.security import verify_client_secret
     with SessionLocal() as session:
         stmt = select(IoTDevice).where(
-            IoTDevice.client_secret_hash == token,
             IoTDevice.is_active == True
         )
-        device = session.scalars(stmt).first()
-        if device:
-            return {
-                "device_id": device.device_id,
-                "device_name": device.device_name,
-                "device_type": device.device_type,
-                "location": device.location,
-                "client_secret_hash": device.client_secret_hash,
-                "is_active": device.is_active,
-                "created_at": device.created_at,
-                "updated_at": device.updated_at
-            }
+        devices = session.scalars(stmt).all()
+        for device in devices:
+            if verify_client_secret(token, device.client_secret_hash):
+                return {
+                    "device_id": device.device_id,
+                    "device_name": device.device_name,
+                    "device_type": device.device_type,
+                    "location": device.location,
+                    "client_secret_hash": device.client_secret_hash,
+                    "is_active": device.is_active,
+                    "created_at": device.created_at,
+                    "updated_at": device.updated_at
+                }
         return None
 
 
