@@ -1,0 +1,6 @@
+{
+  "contract_address": "0x95FC426CbA646ba7AA51162DCa50beb762B27b56",
+  "network": "http://127.0.0.1:7545",
+  "chain_id": 1337,
+  "admin_address": "0x5E08f47199589AC2975337270Bc3D47901469ffb"
+}
