@@ -12,6 +12,7 @@ import math
 import logging
 import numpy as np
 import cv2
+from skimage.feature import local_binary_pattern
 import mediapipe as mp
 
 logger = logging.getLogger(__name__)
@@ -129,42 +130,7 @@ class BlinkTracker:
 #          MÓDULO 2: ANÁLISIS DE TEXTURA (LBP - Local Binary Patterns)
 # =========================================================================
 
-def _compute_lbp(image_gray, radius=1, n_points=8):
-    """
-    Calcula el Local Binary Pattern de una imagen en escala de grises.
-    LBP captura la micro-textura de la piel. Las pantallas y las fotos
-    impresas tienen patrones de textura muy diferentes a la piel real.
-
-    Args:
-        image_gray: Imagen en escala de grises (numpy array)
-        radius: Radio del vecindario circular
-        n_points: Número de puntos en el vecindario
-
-    Returns:
-        Imagen LBP como numpy array
-    """
-    rows, cols = image_gray.shape
-    lbp = np.zeros_like(image_gray, dtype=np.uint8)
-
-    for i in range(radius, rows - radius):
-        for j in range(radius, cols - radius):
-            center = image_gray[i, j]
-            binary_string = 0
-
-            for k in range(n_points):
-                angle = 2 * math.pi * k / n_points
-                x = i + int(round(radius * math.cos(angle)))
-                y = j - int(round(radius * math.sin(angle)))
-
-                if image_gray[x, y] >= center:
-                    binary_string |= (1 << k)
-
-            lbp[i, j] = binary_string
-
-    return lbp
-
-
-def analyze_texture(frame_bgr) -> dict:
+def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
     """
     Analiza la textura facial para distinguir piel real de pantallas/impresiones.
     Las fotos de pantalla y las impresiones tienen patrones LBP más uniformes
@@ -172,6 +138,7 @@ def analyze_texture(frame_bgr) -> dict:
 
     Args:
         frame_bgr: Frame en formato BGR (OpenCV)
+        custom_lbp_threshold: Umbral de entropía LBP dinámico configurado para el dispositivo
 
     Returns:
         dict con score de textura y si parece real
@@ -195,11 +162,12 @@ def analyze_texture(frame_bgr) -> dict:
         # Redimensionar para consistencia
         face_roi = cv2.resize(face_roi, (128, 128))
 
-        # Calcular LBP
-        lbp = _compute_lbp(face_roi, radius=2, n_points=16)
+        # Calcular LBP uniforme con skimage (C compilado, ~50x más rápido)
+        lbp = local_binary_pattern(face_roi, P=16, R=2, method="uniform")
 
-        # Calcular histograma LBP normalizado
-        hist, _ = np.histogram(lbp.ravel(), bins=256, range=(0, 255))
+        # LBP uniforme con P=16 produce valores 0..17 -> histograma de 18 bins
+        n_bins = 18
+        hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins))
         hist = hist.astype(float)
         hist /= (hist.sum() + 1e-7)
 
@@ -213,19 +181,17 @@ def analyze_texture(frame_bgr) -> dict:
         # 3. Energía (fotos tienen más energía concentrada)
         energy = np.sum(hist ** 2)
 
-        # Score compuesto: Basado EXCLUSIVAMENTE en datos empíricos de hardware
-        # Cluster Rostro Real: Entropía ~4.96
-        # Cluster Pantalla OLED: Entropía ~4.50
-        # Las pantallas modernas carecen de la micro-profundidad 3D de los poros humanos.
-        texture_score = min(1.0, max(0.0, (entropy - 4.5) * 2.0))
+        # Score normalizado según el umbral dinámico del dispositivo
+        texture_score = min(1.0, max(0.0, (entropy - (custom_lbp_threshold - 0.4)) / 0.8))
 
-        # Umbral Quirúrgico: La línea divisoria exacta está en 4.75
-        is_real = entropy >= 4.75
+        # Umbral dinámico configurable por dispositivo
+        is_real = entropy >= custom_lbp_threshold
 
         return {
             "is_real": is_real,
             "texture_score": round(texture_score, 4),
             "entropy": round(entropy, 4),
+            "lbp_threshold": round(custom_lbp_threshold, 4),
             "variance": round(variance, 6),
             "energy": round(energy, 6),
         }
@@ -367,7 +333,7 @@ def estimate_head_pose(frame_rgb) -> dict:
 #           MÓDULO 5: SCORE COMPUESTO DE LIVENESS
 # =========================================================================
 
-def comprehensive_liveness_check(frame_bgr) -> dict:
+def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
     """
     Ejecuta TODAS las verificaciones de liveness y retorna un score compuesto.
     Esta es la función principal que combina todas las técnicas anti-spoofing.
@@ -382,6 +348,7 @@ def comprehensive_liveness_check(frame_bgr) -> dict:
 
     Args:
         frame_bgr: Frame en formato BGR (OpenCV)
+        custom_lbp_threshold: Umbral de entropía LBP dinámico por dispositivo (default: 3.2)
 
     Returns:
         dict con liveness_score (0-1), is_live, y desglose de scores
@@ -398,8 +365,8 @@ def comprehensive_liveness_check(frame_bgr) -> dict:
             "details": {}
         }
 
-    # 2. Análisis de textura
-    texture_result = analyze_texture(frame_bgr)
+    # 2. Análisis de textura (con umbral dinámico de hardware)
+    texture_result = analyze_texture(frame_bgr, custom_lbp_threshold=custom_lbp_threshold)
 
     # 3. Análisis de frecuencia
     freq_result = analyze_frequency(frame_bgr)

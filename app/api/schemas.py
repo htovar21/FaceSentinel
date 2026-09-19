@@ -116,6 +116,7 @@ class IoTDeviceCreate(BaseModel):
     device_name: str = Field(..., description="Nombre descriptivo del punto de acceso")
     device_type: str = Field("door", description="Tipo de hardware (door, camera, turnstile, gateway)")
     location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
+    lbp_threshold: float = Field(3.2, description="Umbral de entropía LBP configurado para el sensor óptico del dispositivo")
 
 
 class ACLRuleCreate(BaseModel):

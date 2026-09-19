@@ -38,6 +38,14 @@ def sample_image_base64():
     return base64.b64encode(buffer).decode('utf-8')
 
 
+@pytest.fixture
+def admin_headers():
+    """Crea token JWT con rol admin para pruebas autorizadas."""
+    from app.core.security import create_access_token
+    token = create_access_token(data={"sub": "admin", "role": "admin"})
+    return {"Authorization": f"Bearer {token}"}
+
+
 # =========================================================================
 #                  TESTS DE SALUD DEL SISTEMA
 # =========================================================================
@@ -66,7 +74,12 @@ class TestHealth:
 class TestRegistration:
     """Tests para el endpoint de registro de usuarios."""
 
-    def test_register_without_image(self, client):
+    def test_register_unauthenticated_returns_401(self, client):
+        """Verifica que registrar sin credenciales de admin da 401."""
+        response = client.post("/api/v1/register", json={})
+        assert response.status_code == 401
+
+    def test_register_without_image(self, client, admin_headers):
         """Verifica que registrar sin imagen da error 422."""
         payload = {
             "user_id": "TEST-001",
@@ -74,10 +87,10 @@ class TestRegistration:
             "role": "Tester"
             # Falta image_base64
         }
-        response = client.post("/api/v1/register", json=payload)
+        response = client.post("/api/v1/register", json=payload, headers=admin_headers)
         assert response.status_code == 422  # Validation Error
 
-    def test_register_with_empty_fields(self, client):
+    def test_register_with_empty_fields(self, client, admin_headers):
         """Verifica que campos vacíos son procesados."""
         payload = {
             "user_id": "",
@@ -85,7 +98,7 @@ class TestRegistration:
             "role": "",
             "image_base64": "invalid"
         }
-        response = client.post("/api/v1/register", json=payload)
+        response = client.post("/api/v1/register", json=payload, headers=admin_headers)
         # Debería fallar en el procesamiento de la imagen
         assert response.status_code in [400, 500]
 
@@ -129,11 +142,50 @@ class TestBlockchain:
         data = response.json()
         assert "connected" in data
 
-    def test_auth_history_nonexistent_user(self, client):
+    def test_auth_history_nonexistent_user(self, client, admin_headers):
         """Verifica consulta de historial cuando blockchain no está disponible."""
-        response = client.get("/api/v1/auth-history/NO-EXISTE")
+        response = client.get("/api/v1/auth-history/NO-EXISTE", headers=admin_headers)
         # 503 si blockchain no disponible, o 200 con registros vacíos
         assert response.status_code in [200, 503]
+
+
+# =========================================================================
+#            TESTS DE ENDPOINTS PROTEGIDOS & HARDENING
+# =========================================================================
+
+class TestSecurityHardening:
+    """Tests para verificar los fixes de seguridad aplicados."""
+
+    def test_delete_user_unauthenticated_returns_401(self, client):
+        """Fix #2: DELETE /users/{id} sin autenticacion debe retornar 401."""
+        response = client.delete("/api/v1/users/NON_EXISTENT_USER")
+        assert response.status_code == 401
+
+    def test_device_registration_and_lookup_hash(self, client, admin_headers):
+        """Fix #6: Dispositivo registrado almacena token_lookup_hash y se busca en O(1)."""
+        import secrets
+        from app.services.storage import get_device_by_token
+
+        device_id = f"test_dev_{secrets.token_hex(4)}"
+        payload = {
+            "device_id": device_id,
+            "device_name": "Puerta de Prueba",
+            "device_type": "door",
+            "location": "Laboratorio"
+        }
+        res = client.post("/api/v1/devices", json=payload, headers=admin_headers)
+        assert res.status_code == 200
+        data = res.json()
+        raw_secret = data["client_secret"]
+        assert raw_secret.startswith("hw_")
+
+        # Verificar que get_device_by_token encuentra el dispositivo inmediatamente
+        found = get_device_by_token(raw_secret)
+        assert found is not None
+        assert found["device_id"] == device_id
+
+        # Limpieza
+        client.delete(f"/api/v1/devices/{device_id}", headers=admin_headers)
 
 
 # =========================================================================

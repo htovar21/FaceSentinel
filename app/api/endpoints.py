@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request, BackgroundTasks
 import logging
+import asyncio
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -56,6 +57,7 @@ from app.services.blockchain import (
     get_contract_info,
     is_blockchain_available,
 )
+from app.core.limiter import limiter
 
 router = APIRouter()
 
@@ -118,7 +120,8 @@ def list_users(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/auth/password", tags=["Autenticación y Registro"])
-def authenticate_by_password(auth_data: PasswordAuthRequest):
+@limiter.limit("10/minute")
+def authenticate_by_password(auth_data: PasswordAuthRequest, request: Request):
     """
     Verifica las credenciales tradicionales para roles Admin y Developer.
     Los usuarios finales (role User/Student/Professor) están estrictamente denegados (403).
@@ -226,7 +229,7 @@ def get_my_client_app(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/register", tags=["Autenticación y Registro"])
-def register_user(user_data: UserRegister):
+def register_user(user_data: UserRegister, current_user: dict = Depends(require_admin)):
     """Recibe los datos y la foto, y los envía a la IA para extraer el vector."""
     success, message = register_face(
         user_id=user_data.user_id,
@@ -255,7 +258,7 @@ def authenticate_user(auth_data: AuthRequest):
 
 
 @router.delete("/users/{user_id}", tags=["Autenticación y Registro"])
-def delete_user_account(user_id: str):
+def delete_user_account(user_id: str, current_user: dict = Depends(require_admin)):
     """
     Elimina un usuario del sistema, borrando sus vectores de ChromaDB
     y su perfil en la base de datos SQLite.
@@ -458,13 +461,17 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                                 name=user_name
                             )
                             
-                            # Registrar en la blockchain
-                            log_res = log_authentication(
-                                user_id=user_id,
-                                client_id=effective_client_id,
-                                embedding=None,
-                                access_granted=True,
-                                match_score=distance
+                            # Registrar en blockchain de forma no bloqueante
+                            loop = asyncio.get_event_loop()
+                            log_res = await loop.run_in_executor(
+                                None,
+                                lambda: log_authentication(
+                                    user_id=user_id,
+                                    client_id=effective_client_id,
+                                    embedding=None,
+                                    access_granted=True,
+                                    match_score=distance
+                                )
                             )
                             tx_hash = log_res.get("tx_hash")
                             
@@ -484,13 +491,17 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                             distance = auth_res.get("distance", 0.0)
                             effective_client_id = client_id or "LOCAL_AUTH"
                             
-                            # Registrar acceso denegado en la blockchain
-                            log_authentication(
-                                user_id="UNKNOWN",
-                                client_id=effective_client_id,
-                                embedding=None,
-                                access_granted=False,
-                                match_score=distance
+                            # Registrar fallo en blockchain de forma no bloqueante
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None,
+                                lambda: log_authentication(
+                                    user_id="UNKNOWN",
+                                    client_id=effective_client_id,
+                                    embedding=None,
+                                    access_granted=False,
+                                    match_score=distance
+                                )
                             )
                             
                             await websocket.send_json({
@@ -534,6 +545,7 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
 from fastapi.responses import JSONResponse
 
 @router.post("/physical-access/authenticate", tags=["Acceso Físico"])
+@limiter.limit("20/minute")
 def physical_access_authenticate(
     payload: M2MAuthRequest,
     request: Request,
@@ -571,6 +583,8 @@ def physical_access_authenticate(
             detail="Token de dispositivo incorrecto o no autorizado."
         )
 
+    device_lbp_threshold = device.get("lbp_threshold", 3.2) if isinstance(device, dict) else getattr(device, "lbp_threshold", 3.2)
+
     # 2. Decodificar imagen base64
     try:
         img_bgr = base64_to_image(payload.image_base64)
@@ -580,9 +594,9 @@ def physical_access_authenticate(
             detail=f"Error decodificando imagen: {str(e)}"
         )
 
-    # 3. Validación de Liveness (Anti-Spoofing) en una sola imagen (LBP + FFT)
+    # 3. Validación de Liveness (Anti-Spoofing) con umbral dinámico configurado para este dispositivo
     try:
-        liveness_res = comprehensive_liveness_check(img_bgr)
+        liveness_res = comprehensive_liveness_check(img_bgr, custom_lbp_threshold=device_lbp_threshold)
         if not liveness_res.get("is_live"):
             # Registrar intento fallido por liveness en blockchain en segundo plano
             background_tasks.add_task(
@@ -728,6 +742,8 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         device_type=device_data.device_type,
         location=device_data.location,
         client_secret_hash=secret_hash,
+        token_plain=client_secret,
+        lbp_threshold=device_data.lbp_threshold,
         is_active=True
     )
     
@@ -742,6 +758,7 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         "device_name": device_data.device_name,
         "device_type": device_data.device_type,
         "location": device_data.location,
+        "lbp_threshold": device_data.lbp_threshold,
         "client_secret": client_secret  # Se retorna una sola vez en texto plano
     }
 

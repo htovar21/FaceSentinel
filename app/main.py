@@ -1,3 +1,4 @@
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -8,6 +9,9 @@ from app.core.logging_config import setup_logging
 from app.api.endpoints import router as api_router
 from app.services.blockchain import init_blockchain
 from app.core.security import init_security
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
 
 # Inicializar logging ANTES que todo lo demás
 setup_logging()
@@ -49,6 +53,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # =========================================================================
 #                       MIDDLEWARES
@@ -57,7 +64,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción se cambia por la URL de tu frontend
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

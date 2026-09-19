@@ -103,12 +103,12 @@ class AccessLog(Base):
     __tablename__ = "access_logs"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
     access_granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     device_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     tx_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    client_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    client_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -120,6 +120,9 @@ class IoTDevice(Base):
     device_type: Mapped[str] = mapped_column(String, nullable=False, default="door")  # 'door', 'camera', etc.
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     client_secret_hash: Mapped[str] = mapped_column(String, nullable=False)  # Client_Secret físico cifrado
+    token_lookup_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    # Umbral dinámico LBP configurable por sensor (en BD existentes requiere: ALTER TABLE iot_devices ADD COLUMN lbp_threshold FLOAT DEFAULT 3.2;)
+    lbp_threshold: Mapped[float] = mapped_column(Float, default=3.2)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -511,9 +514,13 @@ def save_iot_device(
     device_type: str,
     location: Optional[str],
     client_secret_hash: str,
+    token_plain: Optional[str] = None,
+    lbp_threshold: float = 3.2,
     is_active: bool = True
 ) -> bool:
     """Guarda o actualiza un dispositivo IoT en la base de datos."""
+    import hashlib
+    lookup_hash = hashlib.sha256(token_plain.encode()).hexdigest() if token_plain else None
     with SessionLocal() as session:
         try:
             device = session.get(IoTDevice, device_id)
@@ -522,6 +529,9 @@ def save_iot_device(
                 device.device_type = device_type
                 device.location = location
                 device.client_secret_hash = client_secret_hash
+                device.lbp_threshold = lbp_threshold
+                if lookup_hash is not None:
+                    device.token_lookup_hash = lookup_hash
                 device.is_active = is_active
                 device.updated_at = datetime.utcnow()
             else:
@@ -531,6 +541,8 @@ def save_iot_device(
                     device_type=device_type,
                     location=location,
                     client_secret_hash=client_secret_hash,
+                    token_lookup_hash=lookup_hash,
+                    lbp_threshold=lbp_threshold,
                     is_active=is_active
                 )
                 session.add(device)
@@ -554,6 +566,7 @@ def get_iot_device(device_id: str) -> Optional[dict]:
                 "device_type": device.device_type,
                 "location": device.location,
                 "client_secret_hash": device.client_secret_hash,
+                "lbp_threshold": getattr(device, "lbp_threshold", 3.2),
                 "is_active": device.is_active,
                 "created_at": device.created_at,
                 "updated_at": device.updated_at
@@ -628,25 +641,53 @@ def get_device_acl_rules(device_id: str) -> List[dict]:
 
 
 def get_device_by_token(token: str) -> Optional[dict]:
-    """Busca en IoTDevice validando el token en texto plano contra su hash bcrypt y is_active == True."""
+    """Busca en IoTDevice usando token_lookup_hash (SHA-256) O(1) y verifica con bcrypt."""
     from app.core.security import verify_client_secret
+    import hashlib
+    lookup = hashlib.sha256(token.encode()).hexdigest()
     with SessionLocal() as session:
+        # Búsqueda optimizada O(1) mediante índice SHA-256
         stmt = select(IoTDevice).where(
-            IoTDevice.is_active == True
+            IoTDevice.is_active == True,
+            IoTDevice.token_lookup_hash == lookup
         )
-        devices = session.scalars(stmt).all()
-        for device in devices:
-            if verify_client_secret(token, device.client_secret_hash):
+        device = session.scalars(stmt).first()
+        if device and verify_client_secret(token, device.client_secret_hash):
+            return {
+                "device_id": device.device_id,
+                "device_name": device.device_name,
+                "device_type": device.device_type,
+                "location": device.location,
+                "client_secret_hash": device.client_secret_hash,
+                "lbp_threshold": getattr(device, "lbp_threshold", 3.2),
+                "is_active": device.is_active,
+                "created_at": device.created_at,
+                "updated_at": device.updated_at
+            }
+
+        # Fallback de compatibilidad para dispositivos creados antes de la migración (token_lookup_hash IS NULL)
+        legacy_stmt = select(IoTDevice).where(
+            IoTDevice.is_active == True,
+            IoTDevice.token_lookup_hash.is_(None)
+        )
+        legacy_devices = session.scalars(legacy_stmt).all()
+        for leg_device in legacy_devices:
+            if verify_client_secret(token, leg_device.client_secret_hash):
+                # Auto-migrar en el primer acceso exitoso
+                leg_device.token_lookup_hash = lookup
+                session.commit()
                 return {
-                    "device_id": device.device_id,
-                    "device_name": device.device_name,
-                    "device_type": device.device_type,
-                    "location": device.location,
-                    "client_secret_hash": device.client_secret_hash,
-                    "is_active": device.is_active,
-                    "created_at": device.created_at,
-                    "updated_at": device.updated_at
+                    "device_id": leg_device.device_id,
+                    "device_name": leg_device.device_name,
+                    "device_type": leg_device.device_type,
+                    "location": leg_device.location,
+                    "client_secret_hash": leg_device.client_secret_hash,
+                    "lbp_threshold": getattr(leg_device, "lbp_threshold", 3.2),
+                    "is_active": leg_device.is_active,
+                    "created_at": leg_device.created_at,
+                    "updated_at": leg_device.updated_at
                 }
+
         return None
 
 
@@ -675,6 +716,7 @@ def get_all_devices() -> list[dict]:
                 "device_name": d.device_name,
                 "device_type": d.device_type,
                 "location": d.location,
+                "lbp_threshold": getattr(d, "lbp_threshold", 3.2),
                 "is_active": d.is_active,
                 "created_at": d.created_at
             }
