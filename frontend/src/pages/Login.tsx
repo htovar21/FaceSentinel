@@ -234,7 +234,9 @@ export default function Login() {
             videoRef.current.srcObject = streamRef.current
 
             // Connect to WebSocket
-            let wsUrl = "ws://127.0.0.1:8000/api/v1/ws/liveness"
+            const apiBase = import.meta.env.VITE_API_URL || (window.location.protocol === "https:" ? `https://${window.location.host}` : "http://127.0.0.1:8000")
+            const defaultWsBase = apiBase.startsWith("/") ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${apiBase}` : apiBase.replace(/^http/, "ws")
+            let wsUrl = `${import.meta.env.VITE_WS_URL || defaultWsBase}/api/v1/ws/liveness`
             const wsParams = new URLSearchParams()
             if (clientId) wsParams.append("client_id", clientId)
             if (action) wsParams.append("action", action)

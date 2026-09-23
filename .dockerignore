@@ -1,0 +1,48 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Git & IDEs
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Tests & Coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Local sensitive files
+.env
+.env.*
+!.env.example
+
+# Knowledge graph & agents
+graphify-out/
+.agents/
+
+# Logs
+data/logs/*
+!data/logs/.gitkeep
+data/temp_images/*
+!data/temp_images/.gitkeep

@@ -1,0 +1,70 @@
+services:
+  # =========================================================================
+  # 1. GANACHE (Blockchain Local Ethereum)
+  # =========================================================================
+  ganache:
+    image: trufflesuite/ganache:latest
+    container_name: facesentinel-ganache
+    command: >
+      --wallet.deterministic
+      --chain.chainId 1337
+      --server.host 0.0.0.0
+      --server.port 7545
+    ports:
+      - "7545:7545"
+    restart: unless-stopped
+    networks:
+      - facesentinel-net
+
+  # =========================================================================
+  # 2. BACKEND (FastAPI + DeepFace + ChromaDB + Anti-Spoofing)
+  # =========================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: facesentinel-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - deepface-cache:/root/.deepface
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - SQLITE_DB_PATH=/app/data/sql/database.db
+      - CHROMA_DB_PATH=/app/data/chromadb
+      - TEMP_IMAGES_PATH=/app/data/temp_images
+      - BLOCKCHAIN_RPC_URL=http://ganache:7545
+      - WEB3_PROVIDER_URI=http://ganache:7545
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - ganache
+    restart: unless-stopped
+    networks:
+      - facesentinel-net
+
+  # =========================================================================
+  # 3. FRONTEND (React + Vite + Tailwind v4 + Nginx Reverse Proxy)
+  # =========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: facesentinel-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - facesentinel-net
+
+volumes:
+  deepface-cache:
+    driver: local
+
+networks:
+  facesentinel-net:
+    driver: bridge

@@ -96,8 +96,10 @@ export default function Signup() {
         ctx.drawImage(video, 0, 0, width, height)
         const base64Image = canvas.toDataURL("image/jpeg")
 
+        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+
         try {
-            const response = await axios.post("http://127.0.0.1:8000/api/v1/register", {
+            const response = await axios.post(`${baseUrl}/api/v1/register`, {
                 user_id: formData.id,
                 name: formData.name,
                 role: formData.role,

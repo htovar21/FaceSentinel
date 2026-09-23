@@ -30,14 +30,13 @@ export default function Dashboard() {
     const userRole = localStorage.getItem("role") || "Desconocido"
 
     const [activeTab, setActiveTab] = useState<"user" | "admin">(userRole.toLowerCase() === "admin" ? "admin" : "user")
+    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 
     useEffect(() => {
         if (!userId) {
             navigate("/")
             return
         }
-
-        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 
         // Verificamos conexión con el servidor
         axios.get(`${baseUrl}/`)
@@ -75,7 +74,7 @@ export default function Dashboard() {
 
         setDeleteLoading(true)
         try {
-            await axios.delete(`http://127.0.0.1:8000/api/v1/users/${userId}`)
+            await axios.delete(`${baseUrl}/api/v1/users/${userId}`)
             localStorage.clear()
             navigate("/")
         } catch (err) {

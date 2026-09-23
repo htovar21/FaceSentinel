@@ -40,9 +40,44 @@ Asegúrate de tener instalados los siguientes programas antes de comenzar:
 
 ---
 
-## 🚀 Pasos para Ejecutar el Proyecto
+---
 
-Sigue este orden estricto para levantar el entorno completo.
+## 🐳 Ejecución Rápida con Docker Compose (Recomendado)
+
+Si dispones de **Docker** y **Docker Compose**, puedes levantar la suite completa (Backend FastAPI con IA, Frontend React/Nginx con WebSockets y Ganache Blockchain) con un solo comando:
+
+```bash
+# 1. (Opcional) Copiar variables de entorno
+cp .env.example .env
+
+# 2. Construir y levantar todos los servicios
+docker compose up --build
+```
+
+### Servicios expuestos:
+- **Frontend (Web UI)**: [http://localhost:5173/](http://localhost:5173/)
+- **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Ganache RPC**: [http://localhost:7545](http://localhost:7545)
+
+### Comandos útiles en Docker:
+```bash
+# Desplegar el Smart Contract en la red Blockchain de Ganache:
+docker compose exec backend python blockchain/deploy.py
+
+# Crear un usuario administrador inicial:
+docker compose exec backend python create_admin.py --cedula admin01 --username admin --name "Administrador General" --password admin
+```
+
+Para detener los servicios:
+```bash
+docker compose down
+```
+
+---
+
+## 🚀 Pasos para Ejecutar el Proyecto (Modo Manual)
+
+Sigue este orden si prefieres ejecutar los componentes sin contenedores:
 
 ### Paso 1: Levantar la Blockchain (Ganache)
 

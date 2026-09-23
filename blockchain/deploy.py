@@ -21,8 +21,8 @@ load_dotenv()
 
 # Red blockchain (Ganache por defecto)
 WEB3_PROVIDER_URI = os.getenv("WEB3_PROVIDER_URI", "http://127.0.0.1:7545")
-ADMIN_ADDRESS = os.getenv("ADMIN_ADDRESS", "")
-ADMIN_PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY", "")
+ADMIN_ADDRESS = os.getenv("ADMIN_ADDRESS") or "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1"
+ADMIN_PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY") or "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
 # CHAIN_ID se autodetecta del nodo conectado para evitar el error de mismatch
 CHAIN_ID = None  # Se llenará en deploy_contract()
 

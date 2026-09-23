@@ -38,8 +38,22 @@ def init_blockchain():
     """
     global _w3, _contract, _admin_account, _private_key, _initialized
 
-    # Verificar que tenemos la dirección del contrato
-    if not settings.SMART_CONTRACT_ADDRESS:
+    # Verificar que tenemos la dirección del contrato (desde settings o desde deploy_info.json)
+    contract_addr = settings.SMART_CONTRACT_ADDRESS
+    if not contract_addr:
+        deploy_info_path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "blockchain", "artifacts", "deploy_info.json"
+        ))
+        if os.path.exists(deploy_info_path):
+            try:
+                with open(deploy_info_path, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+                    contract_addr = info.get("contract_address", "")
+            except Exception:
+                pass
+
+    if not contract_addr:
         logger.warning(
             "⚠️  SMART_CONTRACT_ADDRESS no configurado. "
             "La blockchain está deshabilitada. "
@@ -76,12 +90,12 @@ def init_blockchain():
             abi = json.load(f)
 
         # Instanciar el contrato
-        contract_address = Web3.to_checksum_address(settings.SMART_CONTRACT_ADDRESS)
+        contract_address = Web3.to_checksum_address(contract_addr)
         _contract = _w3.eth.contract(address=contract_address, abi=abi)
 
-        # Configurar cuenta administradora desde settings (cargado desde .env)
-        _admin_account = settings.ADMIN_ADDRESS
-        _private_key = settings.ADMIN_PRIVATE_KEY or settings.DEVICE_PRIVATE_KEY
+        # Configurar cuenta administradora desde settings (o fallback determinístico de Ganache)
+        _admin_account = settings.ADMIN_ADDRESS or "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1"
+        _private_key = settings.ADMIN_PRIVATE_KEY or settings.DEVICE_PRIVATE_KEY or "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
 
         if not _admin_account or not _private_key:
             logger.warning(
