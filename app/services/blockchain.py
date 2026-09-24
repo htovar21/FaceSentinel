@@ -7,6 +7,7 @@ y consultar el historial de accesos.
 import json
 import hashlib
 import os
+import time
 import logging
 
 from web3 import Web3
@@ -30,36 +31,66 @@ _initialized = False     # Flag de inicialización
 #                         INICIALIZACIÓN
 # =========================================================================
 
+def _auto_deploy_contract(w3, admin_account, private_key, abi, bytecode) -> str | None:
+    """Despliega automáticamente el contrato en Ganache si no existe."""
+    try:
+        logger.info("🚀 Contrato no detectado en la blockchain. Desplegando automáticamente...")
+        actual_chain_id = w3.eth.chain_id
+        contract = w3.eth.contract(abi=abi, bytecode=bytecode)
+        nonce = w3.eth.get_transaction_count(admin_account)
+        tx = contract.constructor().build_transaction({
+            "chainId": actual_chain_id,
+            "gasPrice": w3.eth.gas_price,
+            "from": admin_account,
+            "nonce": nonce,
+        })
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key=private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=15)
+        new_address = tx_receipt.contractAddress
+        logger.info(f"🎉 Smart Contract desplegado automáticamente en: {new_address}")
+
+        deploy_info_path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "blockchain", "artifacts", "deploy_info.json"
+        ))
+        os.makedirs(os.path.dirname(deploy_info_path), exist_ok=True)
+        with open(deploy_info_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "contract_address": new_address,
+                "network": settings.BLOCKCHAIN_RPC_URL,
+                "chain_id": actual_chain_id,
+                "admin_address": admin_account
+            }, f, indent=2)
+
+        return new_address
+    except Exception as e:
+        logger.error(f"❌ Error al autodesplegar Smart Contract: {e}")
+        return None
+
+
 def init_blockchain():
     """
     Inicializa la conexión con la blockchain y carga el contrato.
     Se llama automáticamente al levantar el servidor.
+    Si Ganache está corriendo y el contrato aún no existe, lo despliega automáticamente.
     Si Ganache no está disponible, el sistema sigue funcionando sin blockchain.
     """
     global _w3, _contract, _admin_account, _private_key, _initialized
 
     # Verificar que tenemos la dirección del contrato (desde settings o desde deploy_info.json)
     contract_addr = settings.SMART_CONTRACT_ADDRESS
-    if not contract_addr:
-        deploy_info_path = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "..", "blockchain", "artifacts", "deploy_info.json"
-        ))
-        if os.path.exists(deploy_info_path):
-            try:
-                with open(deploy_info_path, "r", encoding="utf-8") as f:
-                    info = json.load(f)
-                    contract_addr = info.get("contract_address", "")
-            except Exception:
-                pass
-
-    if not contract_addr:
-        logger.warning(
-            "⚠️  SMART_CONTRACT_ADDRESS no configurado. "
-            "La blockchain está deshabilitada. "
-            "Ejecuta 'python blockchain/deploy.py' primero."
-        )
-        return False
+    deploy_info_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "blockchain", "artifacts", "deploy_info.json"
+    ))
+    if not contract_addr and os.path.exists(deploy_info_path):
+        try:
+            with open(deploy_info_path, "r", encoding="utf-8") as f:
+                info = json.load(f)
+                contract_addr = info.get("contract_address", "")
+        except Exception:
+            pass
 
     try:
         # Conectar a la blockchain con un timeout para evitar que bloquee el inicio del servidor
@@ -72,30 +103,69 @@ def init_blockchain():
             )
             return False
 
-        # Cargar ABI del contrato
-        abi_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "..", "blockchain", "artifacts", "AccessRegistry_abi.json"
-        )
-        abi_path = os.path.normpath(abi_path)
+        # Configurar cuenta administradora desde settings (o fallback determinístico de Ganache)
+        _admin_account = settings.ADMIN_ADDRESS or "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1"
+        _private_key = settings.ADMIN_PRIVATE_KEY or settings.DEVICE_PRIVATE_KEY or "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
 
-        if not os.path.exists(abi_path):
+        # Cargar ABI y Bytecode (preferir AccessRegistry_build.json precompilado)
+        artifacts_dir = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "blockchain", "artifacts"
+        ))
+        build_path = os.path.join(artifacts_dir, "AccessRegistry_build.json")
+        abi_path = os.path.join(artifacts_dir, "AccessRegistry_abi.json")
+
+        abi = None
+        bytecode = None
+        if os.path.exists(build_path):
+            try:
+                with open(build_path, "r", encoding="utf-8") as f:
+                    build_data = json.load(f)
+                    abi = build_data.get("abi")
+                    bytecode = build_data.get("bytecode")
+            except Exception as e:
+                logger.warning(f"No se pudo leer {build_path}: {e}")
+
+        if not abi and os.path.exists(abi_path):
+            try:
+                with open(abi_path, "r", encoding="utf-8") as f:
+                    abi = json.load(f)
+            except Exception as e:
+                logger.warning(f"No se pudo leer {abi_path}: {e}")
+
+        if not abi:
             logger.warning(
-                f"⚠️  ABI no encontrado en {abi_path}. "
+                f"⚠️  ABI no encontrado en {artifacts_dir}. "
                 "Ejecuta 'python blockchain/deploy.py' primero."
             )
             return False
 
-        with open(abi_path, "r", encoding="utf-8") as f:
-            abi = json.load(f)
+        # Verificar si el contrato ya está desplegado en la dirección provista
+        needs_deploy = True
+        if contract_addr:
+            try:
+                contract_address = Web3.to_checksum_address(contract_addr)
+                code = _w3.eth.get_code(contract_address)
+                if code and code not in (b'', b'\x00', '0x'):
+                    needs_deploy = False
+            except Exception:
+                needs_deploy = True
+
+        if needs_deploy:
+            if bytecode and _admin_account and _private_key:
+                new_addr = _auto_deploy_contract(_w3, _admin_account, _private_key, abi, bytecode)
+                if new_addr:
+                    contract_address = Web3.to_checksum_address(new_addr)
+                else:
+                    return False
+            else:
+                logger.warning("⚠️  El contrato no existe en Ganache y falta el bytecode o claves para desplegarlo.")
+                return False
+        else:
+            contract_address = Web3.to_checksum_address(contract_addr)
 
         # Instanciar el contrato
-        contract_address = Web3.to_checksum_address(contract_addr)
         _contract = _w3.eth.contract(address=contract_address, abi=abi)
-
-        # Configurar cuenta administradora desde settings (o fallback determinístico de Ganache)
-        _admin_account = settings.ADMIN_ADDRESS or "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1"
-        _private_key = settings.ADMIN_PRIVATE_KEY or settings.DEVICE_PRIVATE_KEY or "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
 
         if not _admin_account or not _private_key:
             logger.warning(
@@ -204,10 +274,12 @@ def log_authentication(
 
         # Firmar y enviar
         signed_tx = _w3.eth.account.sign_transaction(tx, private_key=_private_key)
+        t0_seal = time.perf_counter()
         tx_hash = _w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
         # Esperar confirmación
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
+        seal_time_ms = (time.perf_counter() - t0_seal) * 1000.0
 
         # Obtener el recordId del evento emitido
         record_id = None
@@ -222,7 +294,8 @@ def log_authentication(
         tx_hash_hex = tx_hash.hex()
         logger.info(
             f"🔗 Autenticación registrada en blockchain — "
-            f"TX: {tx_hash_hex} | Usuario: {user_id} | "
+            f"TX: {tx_hash_hex} | Bloque: #{receipt.blockNumber} | Gas: {receipt.gasUsed} | "
+            f"Sellado: {seal_time_ms:.1f}ms | Usuario: {user_id} | "
             f"Acceso: {'✅' if access_granted else '❌'}"
         )
 
@@ -245,6 +318,7 @@ def log_authentication(
             "record_id": record_id,
             "block_number": receipt.blockNumber,
             "gas_used": receipt.gasUsed,
+            "seal_time_ms": round(seal_time_ms, 2),
         }
 
     except ContractLogicError as e:

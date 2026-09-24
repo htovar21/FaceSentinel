@@ -7,6 +7,7 @@ Guarda el ABI y la dirección del contrato en blockchain/artifacts/.
 import json
 import os
 import sys
+import time
 
 from solcx import compile_standard, install_solc
 from web3 import Web3
@@ -119,24 +120,34 @@ def deploy_contract(abi, bytecode):
     signed_tx = w3.eth.account.sign_transaction(tx, private_key=ADMIN_PRIVATE_KEY)
 
     # Enviar la transacción
+    t0_deploy = time.perf_counter()
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     print(f"   TX Hash: {tx_hash.hex()}")
 
     # Esperar confirmación
     print("   Esperando confirmación ...")
     tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    deploy_time_ms = (time.perf_counter() - t0_deploy) * 1000.0
 
     contract_address = tx_receipt.contractAddress
     print(f"\n🎉 ¡Contrato desplegado exitosamente!")
     print(f"   Dirección del contrato: {contract_address}")
     print(f"   Gas usado: {tx_receipt.gasUsed}")
     print(f"   Bloque: {tx_receipt.blockNumber}")
+    print(f"   Tiempo de despliegue: {deploy_time_ms:.1f} ms")
 
-    return contract_address, actual_chain_id
+    deploy_metrics = {
+        "tx_hash": tx_hash.hex(),
+        "gas_used": tx_receipt.gasUsed,
+        "block_number": tx_receipt.blockNumber,
+        "deploy_time_ms": round(deploy_time_ms, 2)
+    }
+
+    return contract_address, actual_chain_id, deploy_metrics
 
 
-def save_artifacts(abi, contract_address, chain_id):
-    """Guarda el ABI y la dirección del contrato en archivos JSON."""
+def save_artifacts(abi, contract_address, chain_id, bytecode=None, deploy_metrics=None):
+    """Guarda el ABI, el bytecode, métricas de gas y la dirección del contrato en archivos JSON."""
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
     # Guardar ABI
@@ -145,12 +156,20 @@ def save_artifacts(abi, contract_address, chain_id):
         json.dump(abi, f, indent=2)
     print(f"\n💾 ABI guardado en: {abi_path}")
 
+    # Guardar Build completo (ABI + Bytecode) si está disponible
+    if bytecode:
+        build_path = os.path.join(ARTIFACTS_DIR, "AccessRegistry_build.json")
+        with open(build_path, "w", encoding="utf-8") as f:
+            json.dump({"abi": abi, "bytecode": bytecode}, f, indent=2)
+        print(f"💾 Build compilado guardado en: {build_path}")
+
     # Guardar información del despliegue
     deploy_info = {
         "contract_address": contract_address,
         "network": WEB3_PROVIDER_URI,
         "chain_id": chain_id,
         "admin_address": ADMIN_ADDRESS,
+        "deployment_metrics": deploy_metrics or {}
     }
     info_path = os.path.join(ARTIFACTS_DIR, "deploy_info.json")
     with open(info_path, "w", encoding="utf-8") as f:
@@ -201,11 +220,11 @@ if __name__ == "__main__":
     # Paso 1: Compilar
     abi, bytecode = compile_contract()
 
-    # Paso 2: Desplegar (retorna dirección y chain ID real detectado)
-    contract_address, detected_chain_id = deploy_contract(abi, bytecode)
+    # Paso 2: Desplegar (retorna dirección, chain ID y métricas de despliegue)
+    contract_address, detected_chain_id, deploy_metrics = deploy_contract(abi, bytecode)
 
     # Paso 3: Guardar artefactos
-    save_artifacts(abi, contract_address, detected_chain_id)
+    save_artifacts(abi, contract_address, detected_chain_id, bytecode=bytecode, deploy_metrics=deploy_metrics)
 
     print("\n" + "=" * 60)
     print("  ✅ Despliegue completado exitosamente")

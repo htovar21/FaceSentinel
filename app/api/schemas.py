@@ -108,6 +108,12 @@ class BiometricsEnrollRequest(BaseModel):
 class M2MAuthRequest(BaseModel):
     """Modelo para la petición de autenticación desde el Edge Gateway (M2M)."""
     image_base64: str = Field(..., description="Imagen del rostro recortado en formato Base64")
+    test_type: Optional[str] = Field("LIVE_USER", description="Tipo de prueba experimental (LIVE_USER, SPOOF_PHOTO_PRINT, SPOOF_SCREEN_VIDEO)")
+    environmental_condition: Optional[str] = Field("NORMAL", description="Condición de iluminación (NORMAL, HIGH_LIGHT, LOW_LIGHT)")
+    edge_ear_time_ms: Optional[float] = Field(0.0, description="Tiempo de cálculo MediaPipe EAR en el dispositivo de borde")
+    edge_total_time_ms: Optional[float] = Field(0.0, description="Tiempo total de procesamiento en borde hasta el envío")
+    ear_open_value: Optional[float] = Field(0.0, description="Valor EAR en reposo (ojos abiertos)")
+    ear_blink_value: Optional[float] = Field(0.0, description="Valor EAR mínimo alcanzado en el parpadeo")
 
 
 class IoTDeviceCreate(BaseModel):

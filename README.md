@@ -42,31 +42,27 @@ Asegúrate de tener instalados los siguientes programas antes de comenzar:
 
 ---
 
-## 🐳 Ejecución Rápida con Docker Compose (Recomendado)
+## 🐳 Ejecución Universal con Docker Compose (Sin instalar nada extra)
 
-Si dispones de **Docker** y **Docker Compose**, puedes levantar la suite completa (Backend FastAPI con IA, Frontend React/Nginx con WebSockets y Ganache Blockchain) con un solo comando:
+Si dispones de **Docker** y **Docker Compose** en cualquier computadora (Windows, Linux o macOS), puedes levantar la suite completa con un solo comando:
 
 ```bash
-# 1. (Opcional) Copiar variables de entorno
-cp .env.example .env
-
-# 2. Construir y levantar todos los servicios
 docker compose up --build
 ```
+
+> [!NOTE]
+> **100% Autónomo y Listo para Usar**:
+> - **Smart Contract automático**: Al iniciar, el backend detecta Ganache y despliega automáticamente el Smart Contract `AccessRegistry.sol` precompilado en menos de 1 segundo. No requiere instalar compiladores ni ejecutar scripts manuales.
+> - **Administrador por defecto automático**: Si la base de datos es nueva, el sistema crea automáticamente el usuario administrador inicial para que puedas acceder de inmediato:
+>   - **Usuario**: `admin`
+>   - **Contraseña**: `admin123`
+> - **Cámara en el Navegador**: La cámara web se ejecuta en el navegador mediante HTML5 WebRTC. No se requieren configuraciones de passthrough USB o drivers en Docker.
+> - **Modelos de IA pre-descargados**: Los pesos del modelo ArcFace vienen empaquetados en la imagen Docker para evitar descargas o cuelgues en el primer uso.
 
 ### Servicios expuestos:
 - **Frontend (Web UI)**: [http://localhost:5173/](http://localhost:5173/)
 - **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **Ganache RPC**: [http://localhost:7545](http://localhost:7545)
-
-### Comandos útiles en Docker:
-```bash
-# Desplegar el Smart Contract en la red Blockchain de Ganache:
-docker compose exec backend python blockchain/deploy.py
-
-# Crear un usuario administrador inicial:
-docker compose exec backend python create_admin.py --cedula admin01 --username admin --name "Administrador General" --password admin
-```
 
 Para detener los servicios:
 ```bash

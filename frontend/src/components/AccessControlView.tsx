@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Lock, Unlock, User, Users, Plus, Trash2, Shield, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 
 interface IoTDevice {
     device_id: string
@@ -46,7 +47,7 @@ export default function AccessControlView() {
     const [selectedRole, setSelectedRole] = useState("Student")
 
     const token = localStorage.getItem("token") || ""
-    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+    const baseUrl = API_BASE_URL
 
     const fetchDevices = async () => {
         setLoadingDevices(true)

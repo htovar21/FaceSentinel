@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { CheckCircle2, UserPlus, ArrowLeft, ArrowRight } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 
 export default function Signup() {
     const navigate = useNavigate()
@@ -96,7 +97,7 @@ export default function Signup() {
         ctx.drawImage(video, 0, 0, width, height)
         const base64Image = canvas.toDataURL("image/jpeg")
 
-        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+        const baseUrl = API_BASE_URL
 
         try {
             const response = await axios.post(`${baseUrl}/api/v1/register`, {

@@ -120,6 +120,8 @@ class BlinkStateMachine:
         self.closed_count  = 0
         self.pre_blink_buf = deque(maxlen=PRE_BLINK_BUF)
         self.capture_frame = None
+        self.ear_open_val  = 0.30
+        self.ear_blink_val = 0.20
 
     def update(self, ear: float, frame_bgr) -> bool:
         """
@@ -130,13 +132,18 @@ class BlinkStateMachine:
         self.pre_blink_buf.append(frame_bgr.copy())
 
         if self.state == self.OPEN:
-            if ear < EAR_THRESHOLD:
+            if ear >= EAR_THRESHOLD:
+                self.ear_open_val = ear
+            else:
                 self.state        = self.CLOSING
                 self.closed_count = 1
+                self.ear_blink_val = ear
 
         elif self.state == self.CLOSING:
             if ear < EAR_THRESHOLD:
                 self.closed_count += 1
+                if ear < self.ear_blink_val:
+                    self.ear_blink_val = ear
             else:
                 if self.closed_count >= CONSEC_FRAMES:
                     # Parpadeo confirmado — tomar frame pre-cierre (ojos abiertos)
@@ -190,38 +197,80 @@ def crop_face_from_mesh(frame_bgr, face_landmarks) -> tuple:
 #                     ENVÍO AL BACKEND (hilo secundario)
 # =========================================================================
 
-def send_auth_request(base64_img: str, callbacks: dict):
+def send_auth_request(base64_img: str, telemetry: dict, callbacks: dict):
     """
     Ejecutado en hilo secundario para no bloquear el loop de captura.
-    Llama al endpoint M2M y actualiza el estado compartido via callbacks.
+    Mide la latencia de red de ida y vuelta (RTT) y muestra las métricas de tesis.
     """
+    t_http_start = time.perf_counter()
     try:
+        payload = {
+            "image_base64": base64_img,
+            "test_type": telemetry.get("test_type", "LIVE_USER"),
+            "environmental_condition": telemetry.get("environmental_condition", "NORMAL"),
+            "edge_ear_time_ms": telemetry.get("edge_ear_time_ms", 0.0),
+            "edge_total_time_ms": telemetry.get("edge_total_time_ms", 0.0),
+            "ear_open_value": telemetry.get("ear_open_value", 0.0),
+            "ear_blink_value": telemetry.get("ear_blink_value", 0.0),
+        }
+
         response = requests.post(
             API_URL,
-            json={"image_base64": base64_img},
+            json=payload,
             headers={
                 "Authorization": f"Bearer {DEVICE_TOKEN}",
                 "Content-Type": "application/json",
             },
             timeout=(3, 10),   # (connect_timeout, read_timeout)
         )
+        t_http_end = time.perf_counter()
+        t_http_total_ms = (t_http_end - t_http_start) * 1000.0
+
         data = response.json()
+        server_timings = data.get("timings", {})
+        t_backend_ms = server_timings.get("t_backend_total_ms", 0.0)
+        t_network_rtt_ms = max(0.0, t_http_total_ms - t_backend_ms)
+        t_total_end2end = telemetry.get("edge_total_time_ms", 0.0) + t_http_total_ms
+
+        liveness_data = data.get("liveness", {})
+        bio_data = data.get("biometrics", {})
+
+        print("\n" + "=" * 65)
+        print("          📊 [FACE-SENTINEL TELEMETRÍA EXPERIMENTAL]")
+        print("=" * 65)
+        print(f" 🧪 Prueba: {payload['test_type']} | Entorno: {payload['environmental_condition']}")
+        print(f" ⏱️  Latencia Borde (MediaPipe EAR): {telemetry.get('edge_ear_time_ms', 0.0):.1f} ms | Total Borde: {telemetry.get('edge_total_time_ms', 0.0):.1f} ms")
+        print(f" 🌐 Latencia Red (Transit RTT):     {t_network_rtt_ms:.1f} ms (HTTP Total: {t_http_total_ms:.1f} ms)")
+        if server_timings:
+            print(f" 🖥️  Latencia Backend (FastAPI):    {t_backend_ms:.1f} ms")
+            print(f"     ├─ LBP Textura:   {server_timings.get('t_lbp_ms', 0.0):.1f} ms")
+            print(f"     ├─ FFT Espectro:  {server_timings.get('t_fft_ms', 0.0):.1f} ms")
+            print(f"     ├─ ArcFace 512d:  {server_timings.get('t_arcface_ms', 0.0):.1f} ms")
+            print(f"     ├─ ChromaDB Match:{server_timings.get('t_chroma_ms', 0.0):.1f} ms")
+            print(f"     └─ SQLite ACL:    {server_timings.get('t_sqlite_ms', 0.0):.1f} ms")
+        print(f" ⚡ Latencia Total End-to-End:      {t_total_end2end:.1f} ms {'(Óptima <500ms ✅)' if t_total_end2end < 500 else '(⚠️ Elevada)'}")
+        print(f" 👁️  EAR Ojos Abiertos: {telemetry.get('ear_open_value', 0.0):.3f} | EAR Parpadeo: {telemetry.get('ear_blink_value', 0.0):.3f}")
+        if liveness_data:
+            print(f" 🛡️  Liveness Score: {liveness_data.get('score', 0.0):.4f} | Entropía LBP: {liveness_data.get('entropy', 0.0):.4f} (Umbral: {liveness_data.get('lbp_threshold', 3.2):.2f})")
+        if bio_data:
+            print(f" 🧬 Distancia Coseno: {bio_data.get('distance', 0.0):.4f} (Umbral Match: {bio_data.get('threshold', 0.68):.2f})")
 
         if response.status_code == 200 and data.get("authorization") == "GRANTED":
             user  = data.get("user", {})
             name  = user.get("name", "Desconocido")
             role  = user.get("role", "Usuario")
-            print(f"✅ [GRANTED] Bienvenido/a {name} ({role})")
-            print(f"🔗 TX Blockchain: {data.get('blockchain_tx')}")
-            print("🚪 >>> SIMULACIÓN: Abriendo Puerta / Activando Relé GPIO <<<")
+            print(f" 🔗 Blockchain TX: {data.get('blockchain_tx')}")
+            print(f" 🎯 Resultado: ACCESO CONCEDIDO -> Bienvenido/a {name} ({role})")
+            print("=" * 65 + "\n")
             callbacks["on_granted"](name, role)
         else:
             detail = data.get("detail", "No autorizado")
-            print(f"❌ [DENIED] {detail}")
+            print(f" 🚫 Resultado: ACCESO DENEGADO -> {detail}")
+            print("=" * 65 + "\n")
             callbacks["on_denied"](detail)
 
     except requests.exceptions.RequestException as e:
-        print(f"⚠️ Error de red: {e}")
+        print(f"\n⚠️ Error de red durante la autenticación: {e}\n")
         callbacks["on_error"](str(e))
 
 
@@ -236,8 +285,12 @@ def main():
     print(f"📡 Backend: {API_URL}")
     token_preview = f"{DEVICE_TOKEN[:4]}...{DEVICE_TOKEN[-4:]}" if len(DEVICE_TOKEN) > 8 else "****"
     print(f"🔑 Token: {token_preview}")
-    print("ℹ️  Mira la cámara y parpadea para autenticarte.")
-    print("ℹ️  Presiona 'q' o ESC para salir.")
+    print("\n⌨️  CONTROLES DE EXPERIMENTO:")
+    print("   [1] Modo LIVE_USER (Sujeto real)")
+    print("   [2] Modo SPOOF_PHOTO_PRINT (Foto impresa)")
+    print("   [3] Modo SPOOF_SCREEN_VIDEO (Pantalla celular)")
+    print("   [N] Luz NORMAL | [H] Contraluz/HIGH_LIGHT | [L] Baja luz/LOW_LIGHT")
+    print("   [Q/ESC] Salir")
     print("=========================================================================\n")
 
     cap = cv2.VideoCapture(WEBCAM_INDEX)
@@ -251,10 +304,12 @@ def main():
 
     # Estado compartido entre hilo principal e hilo HTTP (protegido por lock)
     state = {
-        "auth_status"    : None,
-        "status_msg"     : "PARPADEA PARA AUTENTICARTE",
-        "user_info"      : "",
-        "last_auth_time" : 0.0,
+        "auth_status"            : None,
+        "status_msg"             : "PARPADEA PARA AUTENTICARTE",
+        "user_info"              : "",
+        "last_auth_time"         : 0.0,
+        "test_type"              : "LIVE_USER",
+        "environmental_condition": "NORMAL",
     }
     state_lock = threading.Lock()
 
@@ -295,6 +350,8 @@ def main():
             status_msg  = state["status_msg"]
             user_info   = state["user_info"]
             last_auth   = state["last_auth_time"]
+            curr_test_type = state["test_type"]
+            curr_env_cond  = state["environmental_condition"]
 
         # Limpiar estado expirado
         if auth_status in ("GRANTED", "DENIED") and (now - last_auth > STATUS_DURATION):
@@ -306,9 +363,12 @@ def main():
             auth_status = None
 
         # ----------------------------------------------------------------
-        # Face Mesh + cálculo EAR
+        # Face Mesh + cálculo EAR con medición de tiempo
         # ----------------------------------------------------------------
+        t0_mesh = time.perf_counter()
         mesh_results  = face_mesh.process(rgb)
+        t_ear_edge_ms = (time.perf_counter() - t0_mesh) * 1000.0
+
         face_in_frame = False
         ear_value     = 0.0
         box_coords    = None
@@ -326,6 +386,7 @@ def main():
             )
 
             if can_auth and blink_fsm.state != BlinkStateMachine.BLINKED:
+                t0_edge_total = time.perf_counter()
                 blinked = blink_fsm.update(ear_value, frame)
 
                 if blinked and blink_fsm.capture_frame is not None:
@@ -344,12 +405,22 @@ def main():
 
                         _, buf  = cv2.imencode(".jpg", face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
                         b64_img = base64.b64encode(buf).decode("utf-8")
+                        t_edge_total_ms = (time.perf_counter() - t0_edge_total) * 1000.0
 
-                        print(f"\n👁️  Parpadeo detectado (EAR={ear_value:.3f}). Enviando autenticación...")
+                        print(f"\n👁️  Parpadeo detectado (EAR={ear_value:.3f}). Enviando autenticación M2M...")
+
+                        telemetry_payload = {
+                            "test_type": curr_test_type,
+                            "environmental_condition": curr_env_cond,
+                            "edge_ear_time_ms": round(t_ear_edge_ms, 2),
+                            "edge_total_time_ms": round(t_edge_total_ms, 2),
+                            "ear_open_value": round(blink_fsm.ear_open_val, 4),
+                            "ear_blink_value": round(blink_fsm.ear_blink_val, 4),
+                        }
 
                         threading.Thread(
                             target=send_auth_request,
-                            args=(b64_img, {
+                            args=(b64_img, telemetry_payload, {
                                 "on_granted": on_granted,
                                 "on_denied" : on_denied,
                                 "on_error"  : on_error,
@@ -381,12 +452,17 @@ def main():
             cv2.putText(frame, user_info, (16, 56),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
+        # Franja de metadata experimental en la parte superior (bajo header)
+        exp_tag = f"EXP: {curr_test_type} | ENV: {curr_env_cond}"
+        cv2.putText(frame, exp_tag, (16, 75),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+
         # Bounding box del rostro
         if box_coords:
             x1, y1, x2, y2 = box_coords
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-            cv2.putText(frame, f"EAR: {ear_value:.3f}", (x1, max(y1 - 8, 66)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1, cv2.LINE_AA)
+            cv2.putText(frame, f"EAR: {ear_value:.3f} ({t_ear_edge_ms:.0f}ms)", (x1, max(y1 - 8, 85)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
 
         # Barra de cooldown (parte inferior)
         cooldown_left = max(0.0, COOLDOWN_TIME - (now - last_auth))
@@ -397,7 +473,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1, cv2.LINE_AA)
 
         # Estado FSM (debug)
-        fsm_txt = f"FSM: {blink_fsm.state}  frames={blink_fsm.closed_count}"
+        fsm_txt = f"FSM: {blink_fsm.state}  frames={blink_fsm.closed_count}  [1,2,3/N,H,L]"
         cv2.putText(frame, fsm_txt, (8, h - 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1, cv2.LINE_AA)
 
@@ -406,6 +482,30 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q") or key == 27:
             break
+        elif key == ord("1"):
+            with state_lock:
+                state["test_type"] = "LIVE_USER"
+            print("🧪 Modo cambiado a: LIVE_USER")
+        elif key == ord("2"):
+            with state_lock:
+                state["test_type"] = "SPOOF_PHOTO_PRINT"
+            print("🧪 Modo cambiado a: SPOOF_PHOTO_PRINT (Foto en papel)")
+        elif key == ord("3"):
+            with state_lock:
+                state["test_type"] = "SPOOF_SCREEN_VIDEO"
+            print("🧪 Modo cambiado a: SPOOF_SCREEN_VIDEO (Pantalla digital)")
+        elif key in (ord("n"), ord("N")):
+            with state_lock:
+                state["environmental_condition"] = "NORMAL"
+            print("💡 Entorno cambiado a: NORMAL")
+        elif key in (ord("h"), ord("H")):
+            with state_lock:
+                state["environmental_condition"] = "HIGH_LIGHT"
+            print("💡 Entorno cambiado a: HIGH_LIGHT (Contraluz / Alta iluminación)")
+        elif key in (ord("l"), ord("L")):
+            with state_lock:
+                state["environmental_condition"] = "LOW_LIGHT"
+            print("💡 Entorno cambiado a: LOW_LIGHT (Baja iluminación)")
 
     # Liberar recursos
     cap.release()

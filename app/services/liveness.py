@@ -9,6 +9,7 @@ Combina múltiples técnicas para detectar ataques de presentación:
 """
 
 import math
+import time
 import logging
 import numpy as np
 import cv2
@@ -141,8 +142,9 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
         custom_lbp_threshold: Umbral de entropía LBP dinámico configurado para el dispositivo
 
     Returns:
-        dict con score de textura y si parece real
+        dict con score de textura, entropía, tiempos y si parece real
     """
+    t0 = time.perf_counter()
     try:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
 
@@ -153,7 +155,17 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
         if len(faces) == 0:
-            return {"is_real": False, "texture_score": 0.0, "reason": "No se detectó rostro"}
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            return {
+                "is_real": False,
+                "texture_score": 0.0,
+                "entropy": 0.0,
+                "lbp_threshold": round(custom_lbp_threshold, 4),
+                "variance": 0.0,
+                "energy": 0.0,
+                "time_ms": round(elapsed_ms, 2),
+                "reason": "No se detectó rostro"
+            }
 
         # Tomar la primera cara detectada
         x, y, w, h = faces[0]
@@ -186,6 +198,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
 
         # Umbral dinámico configurable por dispositivo
         is_real = entropy >= custom_lbp_threshold
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "is_real": is_real,
@@ -194,11 +207,22 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
             "lbp_threshold": round(custom_lbp_threshold, 4),
             "variance": round(variance, 6),
             "energy": round(energy, 6),
+            "time_ms": round(elapsed_ms, 2),
         }
 
     except Exception as e:
         logger.error(f"Error en análisis de textura: {e}")
-        return {"is_real": True, "texture_score": 0.5, "reason": "Error en análisis"}
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return {
+            "is_real": True,
+            "texture_score": 0.5,
+            "entropy": 0.0,
+            "lbp_threshold": round(custom_lbp_threshold, 4),
+            "variance": 0.0,
+            "energy": 0.0,
+            "time_ms": round(elapsed_ms, 2),
+            "reason": "Error en análisis"
+        }
 
 
 # =========================================================================
@@ -211,16 +235,13 @@ def analyze_frequency(frame_bgr) -> dict:
     Las pantallas y las impresiones introducen artefactos de alta frecuencia
     (patrones de moiré, ruido de impresión) que la piel real no tiene.
 
-    Las imágenes de pantalla tienden a tener un espectro más concentrado
-    en frecuencias específicas, mientras que las caras reales tienen un
-    espectro más distribuido naturalmente.
-
     Args:
         frame_bgr: Frame en formato BGR
 
     Returns:
-        dict con score de frecuencia y si parece real
+        dict con score de frecuencia, tiempo y si parece real
     """
+    t0 = time.perf_counter()
     try:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, (128, 128))
@@ -251,18 +272,11 @@ def analyze_frequency(frame_bgr) -> dict:
         # Ratio entre alta y baja frecuencia
         low_mean = np.mean(low_freq)
         high_mean = np.mean(high_freq)
-
-        # Análisis Espacial: Las pantallas OLED ya no generan el clásico patrón Moiré
-        # de alta frecuencia de las LCDs antiguas. Sus píxeles son tan microscópicos (460 ppi)
-        # que a la cámara web le parecen luz continua, arrojando ratios idénticos a los reales (0.74).
-        
-        # Como las pantallas de gama alta han derrotado teóricamente este filtro,
-        # lo marcamos siempre como 'Real' para no arrojar falsos negativos y dejamos
-        # que el filtro de Textura (Entropía) haga todo el trabajo duro.
         freq_ratio = high_mean / (low_mean + 1e-7)
 
         freq_score = 1.0
         is_real = True
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "is_real": is_real,
@@ -270,11 +284,18 @@ def analyze_frequency(frame_bgr) -> dict:
             "freq_ratio": round(freq_ratio, 4),
             "low_freq_mean": round(low_mean, 4),
             "high_freq_mean": round(high_mean, 4),
+            "time_ms": round(elapsed_ms, 2),
         }
 
     except Exception as e:
         logger.error(f"Error en análisis de frecuencia: {e}")
-        return {"is_real": True, "frequency_score": 0.5, "reason": "Error en análisis"}
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return {
+            "is_real": True,
+            "frequency_score": 0.5,
+            "time_ms": round(elapsed_ms, 2),
+            "reason": "Error en análisis"
+        }
 
 
 # =========================================================================
@@ -343,24 +364,29 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
     - Frecuencia (FFT): 30% — Bueno para detectar impresiones
     - Presencia facial: 30% — Requisito básico
 
-    Nota: El parpadeo se verifica por separado en el flujo de la cámara
-    porque requiere múltiples frames consecutivos.
-
     Args:
         frame_bgr: Frame en formato BGR (OpenCV)
         custom_lbp_threshold: Umbral de entropía LBP dinámico por dispositivo (default: 3.2)
 
     Returns:
-        dict con liveness_score (0-1), is_live, y desglose de scores
+        dict con liveness_score (0-1), is_live, y desglose de scores y tiempos
     """
+    t0_check = time.perf_counter()
+
     # 1. Verificar presencia facial
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     has_face, ear = analyze_blink(frame_rgb)
 
     if not has_face:
+        elapsed_total = (time.perf_counter() - t0_check) * 1000.0
         return {
             "is_live": False,
             "liveness_score": 0.0,
+            "t_lbp_ms": 0.0,
+            "t_fft_ms": 0.0,
+            "t_liveness_total_ms": round(elapsed_total, 2),
+            "entropy": 0.0,
+            "lbp_threshold": round(custom_lbp_threshold, 4),
             "reason": "No se detectó rostro en la imagen",
             "details": {}
         }
@@ -387,10 +413,17 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
 
     # Umbral de decisión: 0.45 (ajustable)
     is_live = liveness_score > 0.45
+    elapsed_total = (time.perf_counter() - t0_check) * 1000.0
 
     result = {
         "is_live": is_live,
         "liveness_score": round(liveness_score, 4),
+        "entropy": texture_result.get("entropy", 0.0),
+        "lbp_threshold": texture_result.get("lbp_threshold", custom_lbp_threshold),
+        "lbp_variance": texture_result.get("variance", 0.0),
+        "t_lbp_ms": texture_result.get("time_ms", 0.0),
+        "t_fft_ms": freq_result.get("time_ms", 0.0),
+        "t_liveness_total_ms": round(elapsed_total, 2),
         "reason": "Prueba de vida aprobada" if is_live else "Posible ataque de presentación detectado",
         "details": {
             "texture": texture_result,
@@ -401,8 +434,8 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
     }
 
     if is_live:
-        logger.info(f"✅ Liveness OK — Score: {liveness_score:.4f}")
+        logger.info(f"✅ Liveness OK — Score: {liveness_score:.4f} (LBP: {result['t_lbp_ms']}ms, FFT: {result['t_fft_ms']}ms)")
     else:
-        logger.warning(f"🚨 Liveness FALLIDO — Score: {liveness_score:.4f}")
+        logger.warning(f"🚨 Liveness FALLIDO — Score: {liveness_score:.4f} (Entropía: {result['entropy']})")
 
     return result

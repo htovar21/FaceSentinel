@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ShieldCheck, Copy, AlertCircle, RefreshCw, Key, FileText, Check, Clock, XCircle, CheckCircle2, Lock, Camera } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 
 interface Client {
     client_id: string
@@ -45,7 +46,7 @@ export default function DeveloperPanel() {
     const [activeSubTab, setActiveSubTab] = useState<"credentials" | "logs" | "security">("credentials")
 
     const token = localStorage.getItem("token") || ""
-    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+    const baseUrl = API_BASE_URL
 
     const [copiedId, setCopiedId] = useState(false)
 

@@ -1,6 +1,10 @@
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request, BackgroundTasks
 import logging
 import asyncio
+import time
+from app.core.config import settings
+from app.services.liveness import comprehensive_liveness_check
+from app.services.metrics_collector import log_experiment_metric
 from app.api.schemas import (
     UserRegister,
     AuthRequest,
@@ -544,6 +548,42 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
 
 from fastapi.responses import JSONResponse
 
+def _record_m2m_metrics_and_blockchain(
+    user_id: str,
+    client_id: str,
+    embedding: list,
+    access_granted: bool,
+    device_id: str,
+    match_score: float,
+    metrics_payload: dict
+):
+    """
+    Tarea en segundo plano que ejecuta el logging en Blockchain/SQLite
+    y complementa el dataset experimental con los datos del bloque y gas.
+    """
+    try:
+        bc_result = log_authentication(
+            user_id=user_id,
+            client_id=client_id,
+            embedding=embedding,
+            access_granted=access_granted,
+            device_id=device_id,
+            match_score=match_score
+        )
+        if isinstance(bc_result, dict):
+            metrics_payload["bc_tx_hash"] = bc_result.get("tx_hash", "") or ""
+            metrics_payload["bc_gas_used"] = bc_result.get("gas_used", 0) or 0
+            metrics_payload["bc_block_number"] = bc_result.get("block_number", 0) or 0
+            metrics_payload["bc_seal_time_ms"] = bc_result.get("seal_time_ms", 0.0) or 0.0
+    except Exception as e:
+        logger.error(f"Error registrando blockchain en background: {e}")
+
+    try:
+        log_experiment_metric(metrics_payload)
+    except Exception as e:
+        logger.error(f"Error guardando métricas experimentales: {e}")
+
+
 @router.post("/physical-access/authenticate", tags=["Acceso Físico"])
 @limiter.limit("20/minute")
 def physical_access_authenticate(
@@ -552,12 +592,15 @@ def physical_access_authenticate(
     background_tasks: BackgroundTasks
 ):
     """
-    Endpoint dedicado a dispositivos físicos M2M.
+    Endpoint dedicado a dispositivos físicos M2M con telemetría para Tesis.
     Valida token, realiza control de vida (liveness),
     extrae embedding y realiza verificación facial contra ChromaDB y SQLite,
     verifica los permisos del dispositivo (ACL/RBAC),
-    y registra el evento en la blockchain de manera inmutable (en segundo plano).
+    y registra el evento en la blockchain de manera inmutable y en el dataset CSV.
     """
+    t0_backend = time.perf_counter()
+    t_sqlite_accum = 0.0
+
     # 1. Autenticación M2M vía cabecera Authorization: Bearer <device_secret>
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -576,7 +619,10 @@ def physical_access_authenticate(
     device_secret = parts[1]
     
     # Buscar dispositivo por token/secreto en SQLite
+    t0_sql = time.perf_counter()
     device = get_device_by_token(device_secret)
+    t_sqlite_accum += (time.perf_counter() - t0_sql) * 1000.0
+
     if not device:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -584,6 +630,7 @@ def physical_access_authenticate(
         )
 
     device_lbp_threshold = device.get("lbp_threshold", 3.2) if isinstance(device, dict) else getattr(device, "lbp_threshold", 3.2)
+    device_id = device.get("device_id", "API-SERVER-01") if isinstance(device, dict) else getattr(device, "device_id", "API-SERVER-01")
 
     # 2. Decodificar imagen base64
     try:
@@ -598,15 +645,42 @@ def physical_access_authenticate(
     try:
         liveness_res = comprehensive_liveness_check(img_bgr, custom_lbp_threshold=device_lbp_threshold)
         if not liveness_res.get("is_live"):
-            # Registrar intento fallido por liveness en blockchain en segundo plano
+            t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+            metrics_payload = {
+                "test_type": payload.test_type or "SPOOF_ATTACK",
+                "environmental_condition": payload.environmental_condition or "NORMAL",
+                "user_id": "UNKNOWN",
+                "granted": False,
+                "rejection_reason": "SPOOFING_DETECTED",
+                "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+                "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+                "t_network_rtt_ms": 0.0,
+                "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+                "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+                "t_arcface_ms": 0.0,
+                "t_chroma_ms": 0.0,
+                "t_sqlite_ms": round(t_sqlite_accum, 2),
+                "t_backend_total_ms": round(t_backend_total_ms, 2),
+                "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+                "ear_open": payload.ear_open_value or 0.0,
+                "ear_blink": payload.ear_blink_value or 0.0,
+                "lbp_entropy": liveness_res.get("entropy", 0.0),
+                "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+                "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+                "liveness_score": liveness_res.get("liveness_score", 0.0),
+                "cosine_distance": 0.0,
+                "match_threshold": settings.FACE_MATCH_THRESHOLD,
+            }
+
             background_tasks.add_task(
-                log_authentication,
+                _record_m2m_metrics_and_blockchain,
                 user_id="UNKNOWN",
                 client_id="PHYSICAL_ACCESS",
                 embedding=None,
                 access_granted=False,
-                device_id=device["device_id"],
-                match_score=0.0
+                device_id=device_id,
+                match_score=0.0,
+                metrics_payload=metrics_payload
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -632,15 +706,42 @@ def physical_access_authenticate(
         )
 
     if not auth_res.get("success"):
-        # Registrar intento de acceso fallido en segundo plano
+        t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+        metrics_payload = {
+            "test_type": payload.test_type or "LIVE_USER",
+            "environmental_condition": payload.environmental_condition or "NORMAL",
+            "user_id": auth_res.get("user_id") or "UNKNOWN",
+            "granted": False,
+            "rejection_reason": "UNKNOWN_FACE_OR_NO_MATCH",
+            "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+            "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+            "t_network_rtt_ms": 0.0,
+            "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+            "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+            "t_arcface_ms": auth_res.get("t_arcface_ms", 0.0),
+            "t_chroma_ms": auth_res.get("t_chroma_ms", 0.0),
+            "t_sqlite_ms": round(t_sqlite_accum, 2),
+            "t_backend_total_ms": round(t_backend_total_ms, 2),
+            "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+            "ear_open": payload.ear_open_value or 0.0,
+            "ear_blink": payload.ear_blink_value or 0.0,
+            "lbp_entropy": liveness_res.get("entropy", 0.0),
+            "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+            "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+            "liveness_score": liveness_res.get("liveness_score", 0.0),
+            "cosine_distance": auth_res.get("distance", 0.0),
+            "match_threshold": settings.FACE_MATCH_THRESHOLD,
+        }
+
         background_tasks.add_task(
-            log_authentication,
-            user_id="UNKNOWN",
+            _record_m2m_metrics_and_blockchain,
+            user_id=auth_res.get("user_id") or "UNKNOWN",
             client_id="PHYSICAL_ACCESS",
             embedding=None,
             access_granted=False,
-            device_id=device["device_id"],
-            match_score=auth_res.get("distance", 0.0)
+            device_id=device_id,
+            match_score=auth_res.get("distance", 0.0),
+            metrics_payload=metrics_payload
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -651,39 +752,98 @@ def physical_access_authenticate(
     distance = auth_res["distance"]
 
     # 5. Control de Acceso (RBAC/ACL)
+    t0_sql2 = time.perf_counter()
     user = get_user_by_id(user_id)
+    t_sqlite_accum += (time.perf_counter() - t0_sql2) * 1000.0
+
     if not user:
-        # Registrar intento fallido en segundo plano
+        t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+        metrics_payload = {
+            "test_type": payload.test_type or "LIVE_USER",
+            "environmental_condition": payload.environmental_condition or "NORMAL",
+            "user_id": user_id,
+            "granted": False,
+            "rejection_reason": "USER_NOT_IN_SQLITE",
+            "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+            "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+            "t_network_rtt_ms": 0.0,
+            "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+            "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+            "t_arcface_ms": auth_res.get("t_arcface_ms", 0.0),
+            "t_chroma_ms": auth_res.get("t_chroma_ms", 0.0),
+            "t_sqlite_ms": round(t_sqlite_accum, 2),
+            "t_backend_total_ms": round(t_backend_total_ms, 2),
+            "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+            "ear_open": payload.ear_open_value or 0.0,
+            "ear_blink": payload.ear_blink_value or 0.0,
+            "lbp_entropy": liveness_res.get("entropy", 0.0),
+            "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+            "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+            "liveness_score": liveness_res.get("liveness_score", 0.0),
+            "cosine_distance": distance,
+            "match_threshold": settings.FACE_MATCH_THRESHOLD,
+        }
+
         background_tasks.add_task(
-            log_authentication,
+            _record_m2m_metrics_and_blockchain,
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
             access_granted=False,
-            device_id=device["device_id"],
-            match_score=distance
+            device_id=device_id,
+            match_score=distance,
+            metrics_payload=metrics_payload
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario no encontrado en la base de datos relacional."
         )
 
+    t0_sql3 = time.perf_counter()
     has_access = verify_device_access(
         device_id=device["device_id"],
         user_id=user_id,
         user_role=user["role"]
     )
+    t_sqlite_accum += (time.perf_counter() - t0_sql3) * 1000.0
 
     if not has_access:
-        # Registrar intento fallido por falta de permisos en segundo plano
+        t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+        metrics_payload = {
+            "test_type": payload.test_type or "LIVE_USER",
+            "environmental_condition": payload.environmental_condition or "NORMAL",
+            "user_id": user_id,
+            "granted": False,
+            "rejection_reason": "ACL_FORBIDDEN",
+            "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+            "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+            "t_network_rtt_ms": 0.0,
+            "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+            "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+            "t_arcface_ms": auth_res.get("t_arcface_ms", 0.0),
+            "t_chroma_ms": auth_res.get("t_chroma_ms", 0.0),
+            "t_sqlite_ms": round(t_sqlite_accum, 2),
+            "t_backend_total_ms": round(t_backend_total_ms, 2),
+            "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+            "ear_open": payload.ear_open_value or 0.0,
+            "ear_blink": payload.ear_blink_value or 0.0,
+            "lbp_entropy": liveness_res.get("entropy", 0.0),
+            "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+            "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+            "liveness_score": liveness_res.get("liveness_score", 0.0),
+            "cosine_distance": distance,
+            "match_threshold": settings.FACE_MATCH_THRESHOLD,
+        }
+
         background_tasks.add_task(
-            log_authentication,
+            _record_m2m_metrics_and_blockchain,
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
             access_granted=False,
-            device_id=device["device_id"],
-            match_score=distance
+            device_id=device_id,
+            match_score=distance,
+            metrics_payload=metrics_payload
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -691,17 +851,45 @@ def physical_access_authenticate(
         )
 
     # 6. Generar log inmutable de Éxito en Blockchain y SQLite en segundo plano (asíncrono)
+    t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+    metrics_payload = {
+        "test_type": payload.test_type or "LIVE_USER",
+        "environmental_condition": payload.environmental_condition or "NORMAL",
+        "user_id": user_id,
+        "granted": True,
+        "rejection_reason": "NONE_GRANTED",
+        "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+        "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+        "t_network_rtt_ms": 0.0,
+        "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+        "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+        "t_arcface_ms": auth_res.get("t_arcface_ms", 0.0),
+        "t_chroma_ms": auth_res.get("t_chroma_ms", 0.0),
+        "t_sqlite_ms": round(t_sqlite_accum, 2),
+        "t_backend_total_ms": round(t_backend_total_ms, 2),
+        "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+        "ear_open": payload.ear_open_value or 0.0,
+        "ear_blink": payload.ear_blink_value or 0.0,
+        "lbp_entropy": liveness_res.get("entropy", 0.0),
+        "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+        "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+        "liveness_score": liveness_res.get("liveness_score", 0.0),
+        "cosine_distance": distance,
+        "match_threshold": settings.FACE_MATCH_THRESHOLD,
+    }
+
     background_tasks.add_task(
-        log_authentication,
+        _record_m2m_metrics_and_blockchain,
         user_id=user_id,
         client_id="PHYSICAL_ACCESS",
-        embedding=None,
+        embedding=auth_res.get("embedding"),
         access_granted=True,
-        device_id=device["device_id"],
-        match_score=distance
+        device_id=device_id,
+        match_score=distance,
+        metrics_payload=metrics_payload
     )
 
-    # 7. Respuesta exitosa
+    # 7. Respuesta exitosa con telemetría de backend para cálculo de RTT en el Edge
     return {
         "status": "success",
         "authorization": "GRANTED",
@@ -710,7 +898,24 @@ def physical_access_authenticate(
             "name": user["name"],
             "role": user["role"]
         },
-        "blockchain_tx": "PENDING_COMMIT"
+        "blockchain_tx": "PENDING_COMMIT",
+        "timings": {
+            "t_backend_total_ms": round(t_backend_total_ms, 2),
+            "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+            "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+            "t_arcface_ms": auth_res.get("t_arcface_ms", 0.0),
+            "t_chroma_ms": auth_res.get("t_chroma_ms", 0.0),
+            "t_sqlite_ms": round(t_sqlite_accum, 2)
+        },
+        "liveness": {
+            "score": liveness_res.get("liveness_score", 0.0),
+            "entropy": liveness_res.get("entropy", 0.0),
+            "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold)
+        },
+        "biometrics": {
+            "distance": round(distance, 4),
+            "threshold": settings.FACE_MATCH_THRESHOLD
+        }
     }
 
 

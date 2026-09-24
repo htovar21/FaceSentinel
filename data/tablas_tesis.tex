@@ -1,0 +1,71 @@
+% =========================================================================
+% Tablas y Resultados Experimentales para el Capítulo IV — FaceSentinel
+% Generado automáticamente desde metricas_tesis.csv
+% =========================================================================
+
+% --- TABLA 1: MATRIZ DE CONFUSIÓN ---
+\begin{table}[htbp]
+\centering
+\caption{Matriz de Confusión del Sistema FaceSentinel}
+\label{tab:confusion_matrix}
+\begin{tabular}{l|c|c|c}
+\hline
+\textbf{Condición Real \textbackslash{} Decisión} & \textbf{Acceso Concedido} & \textbf{Acceso Denegado} & \textbf{Total} \\ \hline
+\textbf{Sujeto Vivo (Legítimo)} & \textbf{4} (VP) & \textbf{0} (FN) & 4 \\ \hline
+\textbf{Ataque de Presentación (Spoof)} & \textbf{0} (FP) & \textbf{4} (VN) & 4 \\ \hline
+\textbf{Total General} & 4 & 4 & \textbf{8} \\ \hline
+\end{tabular}
+\end{table}
+
+% --- TABLA 2: MÉTRICAS DE RENDIMIENTO BIOMÉTRICO ---
+\begin{table}[htbp]
+\centering
+\caption{Métricas de Rendimiento y Tasas de Error Biométrico}
+\label{tab:metricas_biometricas}
+\begin{tabular}{l|c|l}
+\hline
+\textbf{Métrica / Indicador} & \textbf{Valor Obtenido} & \textbf{Interpretación Académica} \\ \hline
+Exactitud (Accuracy) & 100.00\% & Capacidad global de clasificación correcta \\
+Precisión (Precision) & 100.00\% & Fiabilidad ante accesos concedidos \\
+Sensibilidad / Recall (TPR) & 100.00\% & Tasa de verificación de usuarios legítimos \\
+Especificidad (TNR) & 100.00\% & Tasa de detección y bloqueo de ataques \\
+F1-Score & 100.00\% & Media armónica de precisión y recall \\
+Tasa de Falsa Aceptación (FAR) & 0.00\% & Intentos de spoofing aceptados indebidamente \\
+Tasa de Falso Rechazo (FRR) & 0.00\% & Usuarios legítimos denegados erróneamente \\ \hline
+\end{tabular}
+\end{table}
+
+% --- TABLA 3: DESGLOSE DE LATENCIAS EXPERIMENTALES ---
+\begin{table}[htbp]
+\centering
+\caption{Desglose de Latencias de Procesamiento en Milisegundos}
+\label{tab:latencias_pipeline}
+\begin{tabular}{l|c|c|c|c}
+\hline
+\textbf{Etapa del Pipeline} & \textbf{Media (ms)} & \textbf{Desv. Est. (ms)} & \textbf{Mín (ms)} & \textbf{Máx (ms)} \\ \hline
+Edge: MediaPipe Face Mesh EAR & 21.75 & $\pm 0.75$ & 21.0 & 22.5 \\
+Edge: Procesamiento Total Borde & 36.5 & $\pm 1.5$ & 35.0 & 38.0 \\
+Red Troncal: Tránsito RTT & 14.6 & $\pm 0.6$ & 14.0 & 15.2 \\
+Backend: LBP Entropía de Textura & 11.7 & $\pm 0.7$ & 11.0 & 12.4 \\
+Backend: FFT Espectro Frecuencia & 7.8 & $\pm 0.3$ & 7.5 & 8.1 \\
+Backend: ArcFace Extracción 512d & 245.0 & $\pm 0.0$ & 245.0 & 245.0 \\
+Backend: ChromaDB Match Vectorial & 11.2 & $\pm 0.0$ & 11.2 & 11.2 \\
+Backend: SQLite Consulta ACL & 1.95 & $\pm 0.15$ & 1.8 & 2.1 \\ \hline
+\textbf{Backend: Tiempo Total Servidor} & \textbf{153.5} & $\pm 131.5$ & 22.0 & 285.0 \\ \hline
+\textbf{Latencia Total End-to-End} & \textbf{204.6} & $\pm 133.6$ & 71.0 & 338.2 \\ \hline
+\end{tabular}
+\end{table}
+
+% --- TABLA 4: MÉTRICAS DE EFICIENCIA BLOCKCHAIN ---
+\begin{table}[htbp]
+\centering
+\caption{Consumo de Gas y Tiempos de Sellado en Red Blockchain}
+\label{tab:blockchain_metrics}
+\begin{tabular}{l|c|c}
+\hline
+\textbf{Parámetro Evaluado} & \textbf{Valor Promedio} & \textbf{Observaciones} \\ \hline
+Consumo de Gas (\texttt{logAuthentication}) & 68,432 gas & Costo computacional en EVM \\
+Tiempo de Sellado (Block Sealing) & 112.7 ms & Confirmación asíncrona del bloque \\
+Transacciones Notariadas & 8 & Eventos inmutables en ledger \\ \hline
+\end{tabular}
+\end{table}

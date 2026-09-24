@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from "@/components/ui/button"
 import { Activity, ShieldCheck, Lock, LogOut, User, Trash2, Clock, CheckCircle2, XCircle } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 import AdminPanel from "../components/AdminPanel"
 import DeveloperPanel from "../components/DeveloperPanel"
 
@@ -30,7 +31,7 @@ export default function Dashboard() {
     const userRole = localStorage.getItem("role") || "Desconocido"
 
     const [activeTab, setActiveTab] = useState<"user" | "admin">(userRole.toLowerCase() === "admin" ? "admin" : "user")
-    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+    const baseUrl = API_BASE_URL
 
     useEffect(() => {
         if (!userId) {

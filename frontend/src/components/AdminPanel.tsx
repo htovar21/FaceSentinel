@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ShieldCheck, Plus, CheckCircle2, Copy, AlertCircle, RefreshCw, Key, FileText, Check, Clock, XCircle } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 import IoTDevicesView from "./IoTDevicesView"
 import AccessControlView from "./AccessControlView"
 
@@ -48,7 +49,7 @@ export default function AdminPanel() {
     const [loadingLogs, setLoadingLogs] = useState(false)
 
     const token = localStorage.getItem("token") || ""
-    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+    const baseUrl = API_BASE_URL
 
     const fetchClients = async () => {
         setLoadingClients(true)

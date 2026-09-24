@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Cpu, Plus, Trash2, Copy, Check, MapPin, Activity, AlertCircle, RefreshCw, Key } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL } from "@/config/api"
 
 interface IoTDevice {
     device_id: string
@@ -32,7 +33,7 @@ export default function IoTDevicesView() {
     const [copiedSecret, setCopiedSecret] = useState(false)
 
     const token = localStorage.getItem("token") || ""
-    const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+    const baseUrl = API_BASE_URL
 
     const fetchDevices = async () => {
         setLoading(true)

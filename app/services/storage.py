@@ -149,9 +149,35 @@ class AccessControlList(Base):
 
 
 def init_sqlite():
-    """Crea las tablas si no existen al arrancar el sistema."""
+    """Crea las tablas si no existen al arrancar el sistema y siembra el admin inicial si la BD está vacía."""
     Base.metadata.create_all(bind=engine)
     logger.info("✅ Tablas SQLite creadas/verificadas con SQLAlchemy 2.0 ORM.")
+
+    # Auto-seeding: Crear administrador por defecto si no existe ninguno
+    try:
+        with SessionLocal() as db:
+            admin_exists = db.execute(select(User).where(func.lower(User.role) == "admin")).scalars().first()
+            if not admin_exists:
+                import os
+                from app.core.security import hash_client_secret
+                default_username = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
+                default_password = os.getenv("INITIAL_ADMIN_PASSWORD", "admin123")
+                default_name = os.getenv("INITIAL_ADMIN_NAME", "Administrador del Sistema")
+                default_id = os.getenv("INITIAL_ADMIN_ID", "ADMIN001")
+
+                admin_user = User(
+                    user_id=default_id,
+                    username=default_username,
+                    name=default_name,
+                    role="Admin",
+                    password_hash=hash_client_secret(default_password),
+                    associated_client_id=None
+                )
+                db.add(admin_user)
+                db.commit()
+                logger.info(f"🔑 Administrador inicial creado exitosamente -> Usuario: '{default_username}' | Contraseña: '{default_password}'")
+    except Exception as e:
+        logger.error(f"Error al verificar/sembrar administrador inicial: {e}")
 
 
 # =========================================================================

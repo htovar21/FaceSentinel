@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Camera, CheckCircle2, UserCircle2, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
 import axios from "axios"
+import { API_BASE_URL, getWebSocketUrl } from "@/config/api"
 
 export default function Login() {
     const navigate = useNavigate()
@@ -87,7 +88,7 @@ export default function Login() {
 
         setLoading(true)
         setError("")
-        const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+        const baseUrl = API_BASE_URL
 
         try {
             const response = await axios.post(`${baseUrl}/api/v1/auth/password`, {
@@ -160,7 +161,7 @@ export default function Login() {
         setLivenessMessage("Identificando usuario en Blockchain...")
 
         try {
-            const response = await axios.post("http://127.0.0.1:8000/api/v1/authenticate", {
+            const response = await axios.post(`${API_BASE_URL}/api/v1/authenticate`, {
                 image_base64: finalImageBase64,
                 client_id: clientId || undefined
             })
@@ -234,9 +235,7 @@ export default function Login() {
             videoRef.current.srcObject = streamRef.current
 
             // Connect to WebSocket
-            const apiBase = import.meta.env.VITE_API_URL || (window.location.protocol === "https:" ? `https://${window.location.host}` : "http://127.0.0.1:8000")
-            const defaultWsBase = apiBase.startsWith("/") ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${apiBase}` : apiBase.replace(/^http/, "ws")
-            let wsUrl = `${import.meta.env.VITE_WS_URL || defaultWsBase}/api/v1/ws/liveness`
+            let wsUrl = getWebSocketUrl("/api/v1/ws/liveness")
             const wsParams = new URLSearchParams()
             if (clientId) wsParams.append("client_id", clientId)
             if (action) wsParams.append("action", action)
