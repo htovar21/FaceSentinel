@@ -64,23 +64,26 @@ def create_test_users():
             )
         ''')
 
+        from datetime import datetime
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
         # Insertar o reemplazar el cliente OAuth
         redirect_uris_json = json.dumps(redirect_uris)
         cursor.execute(
-            "INSERT OR REPLACE INTO oauth_clients (client_id, client_secret_hash, redirect_uris, app_name) VALUES (?, ?, ?, ?)",
-            (client_id, client_secret_hash, redirect_uris_json, app_name)
+            "INSERT OR REPLACE INTO oauth_clients (client_id, client_secret_hash, redirect_uris, app_name, created_at) VALUES (?, ?, ?, ?, ?)",
+            (client_id, client_secret_hash, redirect_uris_json, app_name, now)
         )
 
         # Insertar o reemplazar el Desarrollador
         cursor.execute(
-            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, ?, ?)",
-            (dev_user_id, dev_username, dev_name, "Developer", dev_password_hash, client_id)
+            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (dev_user_id, dev_username, dev_name, "Developer", dev_password_hash, client_id, now, now)
         )
 
         # Insertar o reemplazar el Usuario Regular en SQLite
         cursor.execute(
-            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, NULL, NULL)",
-            (user_id, user_username, user_name, "User")
+            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)",
+            (user_id, user_username, user_name, "User", now, now)
         )
 
         conn.commit()

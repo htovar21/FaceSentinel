@@ -9,12 +9,13 @@ import AdminPanel from "../components/AdminPanel"
 import DeveloperPanel from "../components/DeveloperPanel"
 
 interface AuthEvent {
-    id: number
+    id?: number
     user_id: string
     access_granted: boolean
     match_score: number
     device_id: string
-    tx_hash: string
+    tx_hash?: string
+    biometric_hash?: string
     timestamp: number
 }
 
@@ -39,8 +40,8 @@ export default function Dashboard() {
             return
         }
 
-        // Verificamos conexión con el servidor
-        axios.get(`${baseUrl}/`)
+        // Verificamos conexión con el servidor y estado de la Blockchain
+        axios.get(`${baseUrl}/api/v1/health`)
             .then(r => setDbStatus(r.data))
             .catch(() => setDbStatus({ status: "offline", blockchain: "disconnected" }))
 
@@ -52,8 +53,17 @@ export default function Dashboard() {
                 headers: { Authorization: `Bearer ${token}` }
             })
                 .then(r => {
-                    if (r.data.success && r.data.records) {
+                    if (r.data.success && r.data.records && r.data.records.length > 0) {
                         setAuthHistory(r.data.records)
+                    } else {
+                        // Fallback para admin: cargar los eventos globales de acceso físico en Blockchain
+                        axios.get(`${baseUrl}/api/v1/clients/PHYSICAL_ACCESS/logs?limit=50`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                        }).then(cRes => {
+                            if (cRes.data.success && cRes.data.records) {
+                                setAuthHistory(cRes.data.records)
+                            }
+                        }).catch(() => {})
                     }
                 })
                 .catch(err => console.error("Error cargando historial", err))
@@ -269,9 +279,10 @@ export default function Dashboard() {
                                                     <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
                                                         <tr>
                                                             <th className="px-4 py-3 rounded-tl-md">Estado</th>
+                                                            <th className="px-4 py-3">Dispositivo</th>
                                                             <th className="px-4 py-3">Fecha y Hora</th>
                                                             <th className="px-4 py-3">Score (Distancia)</th>
-                                                            <th className="px-4 py-3 rounded-tr-md">Transacción (TxHash)</th>
+                                                            <th className="px-4 py-3 rounded-tr-md">Hash Criptográfico (Web3)</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -289,24 +300,29 @@ export default function Dashboard() {
                                                                     )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
+                                                                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-muted text-foreground">
+                                                                        {log.device_id || "GATEWAY"}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-xs">
                                                                     {new Date((log.timestamp as any) * 1000).toLocaleString()}
                                                                 </td>
-                                                                <td className="px-4 py-3 font-mono">
+                                                                <td className="px-4 py-3 font-mono text-xs">
                                                                     {log.match_score !== null && log.match_score !== undefined
                                                                         ? log.match_score.toFixed(4)
                                                                         : "N/A"}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    {log.tx_hash && log.tx_hash !== "N/A" ? (
-                                                                        <a
-                                                                            href={`#`}
-                                                                            className="text-primary hover:underline font-mono text-xs flex items-center"
-                                                                            title="Ver en explorador de bloques"
+                                                                    {(log.biometric_hash || log.tx_hash) ? (
+                                                                        <span
+                                                                            className="text-primary font-mono text-xs flex items-center gap-1.5"
+                                                                            title={log.biometric_hash || log.tx_hash}
                                                                         >
-                                                                            {log.tx_hash.substring(0, 10)}...{log.tx_hash.substring(log.tx_hash.length - 8)}
-                                                                        </a>
+                                                                            <Lock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                                                                            {((log.biometric_hash || log.tx_hash) as string).substring(0, 10)}...{((log.biometric_hash || log.tx_hash) as string).substring(((log.biometric_hash || log.tx_hash) as string).length - 8)}
+                                                                        </span>
                                                                     ) : (
-                                                                        <span className="text-muted-foreground">Local / Sin TxHash</span>
+                                                                        <span className="text-muted-foreground text-xs">Local / Sin Hash</span>
                                                                     )}
                                                                 </td>
                                                             </tr>

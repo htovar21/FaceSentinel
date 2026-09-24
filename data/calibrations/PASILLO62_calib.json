@@ -1,0 +1,18 @@
+{
+    "device_id": "PASILLO62",
+    "calibration_timestamp": "2026-09-24 13:57:30",
+    "resolution": {
+        "width": 1280,
+        "height": 720
+    },
+    "sample_count": 40,
+    "entropy_stats": {
+        "mean": 3.6962,
+        "std": 0.0089,
+        "min": 3.6758,
+        "max": 3.7165
+    },
+    "variance_mean": 0.002577,
+    "ear_open_mean": 0.3218,
+    "optimal_lbp_threshold": 3.68
+}

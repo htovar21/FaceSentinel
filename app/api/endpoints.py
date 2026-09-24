@@ -1,9 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status, Request, BackgroundTasks
+import os
+import json
 import logging
 import asyncio
 import time
+import threading
 from app.core.config import settings
-from app.services.liveness import comprehensive_liveness_check
+from app.services.liveness import comprehensive_liveness_check, calibrate_camera_stream
 from app.services.metrics_collector import log_experiment_metric
 from app.api.schemas import (
     UserRegister,
@@ -17,6 +20,7 @@ from app.api.schemas import (
     BiometricsEnrollRequest,
     M2MAuthRequest,
     IoTDeviceCreate,
+    IoTDeviceUpdate,
     ACLRuleCreate,
 )
 import secrets
@@ -33,6 +37,8 @@ from app.services.storage import (
     verify_device_access,
     get_all_users,
     save_iot_device,
+    update_iot_device,
+    get_iot_device,
     delete_iot_device,
     get_device_acl_rules,
     save_acl_rule,
@@ -584,6 +590,23 @@ def _record_m2m_metrics_and_blockchain(
         logger.error(f"Error guardando métricas experimentales: {e}")
 
 
+def _dispatch_background_log(
+    user_id: str,
+    client_id: str,
+    embedding: list,
+    access_granted: bool,
+    device_id: str,
+    match_score: float,
+    metrics_payload: dict
+):
+    """Lanza la grabación de métricas y blockchain en hilo daemon para garantizar ejecución incluso ante HTTPException."""
+    threading.Thread(
+        target=_record_m2m_metrics_and_blockchain,
+        args=(user_id, client_id, embedding, access_granted, device_id, match_score, metrics_payload),
+        daemon=True
+    ).start()
+
+
 @router.post("/physical-access/authenticate", tags=["Acceso Físico"])
 @limiter.limit("20/minute")
 def physical_access_authenticate(
@@ -672,8 +695,7 @@ def physical_access_authenticate(
                 "match_threshold": settings.FACE_MATCH_THRESHOLD,
             }
 
-            background_tasks.add_task(
-                _record_m2m_metrics_and_blockchain,
+            _dispatch_background_log(
                 user_id="UNKNOWN",
                 client_id="PHYSICAL_ACCESS",
                 embedding=None,
@@ -733,8 +755,7 @@ def physical_access_authenticate(
             "match_threshold": settings.FACE_MATCH_THRESHOLD,
         }
 
-        background_tasks.add_task(
-            _record_m2m_metrics_and_blockchain,
+        _dispatch_background_log(
             user_id=auth_res.get("user_id") or "UNKNOWN",
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -784,8 +805,7 @@ def physical_access_authenticate(
             "match_threshold": settings.FACE_MATCH_THRESHOLD,
         }
 
-        background_tasks.add_task(
-            _record_m2m_metrics_and_blockchain,
+        _dispatch_background_log(
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -835,8 +855,7 @@ def physical_access_authenticate(
             "match_threshold": settings.FACE_MATCH_THRESHOLD,
         }
 
-        background_tasks.add_task(
-            _record_m2m_metrics_and_blockchain,
+        _dispatch_background_log(
             user_id=user_id,
             client_id="PHYSICAL_ACCESS",
             embedding=None,
@@ -949,6 +968,7 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         client_secret_hash=secret_hash,
         token_plain=client_secret,
         lbp_threshold=device_data.lbp_threshold,
+        stream_url=device_data.stream_url,
         is_active=True
     )
     
@@ -963,8 +983,96 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         "device_name": device_data.device_name,
         "device_type": device_data.device_type,
         "location": device_data.location,
+        "stream_url": device_data.stream_url,
         "lbp_threshold": device_data.lbp_threshold,
         "client_secret": client_secret  # Se retorna una sola vez en texto plano
+    }
+
+
+@router.get("/devices/{device_id}", tags=["Acceso Físico"])
+def get_single_device(device_id: str, current_user: dict = Depends(require_admin)):
+    """Obtiene los detalles de configuración y calibración de un dispositivo."""
+    dev = get_iot_device(device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    return dev
+
+
+@router.patch("/devices/{device_id}", tags=["Acceso Físico"])
+def update_device(
+    device_id: str,
+    update_data: IoTDeviceUpdate,
+    current_user: dict = Depends(require_admin)
+):
+    """Actualiza la calibración LBP, URL de streaming RTSP, nombre o ubicación de un dispositivo."""
+    success = update_iot_device(
+        device_id=device_id,
+        device_name=update_data.device_name,
+        location=update_data.location,
+        stream_url=update_data.stream_url,
+        lbp_threshold=update_data.lbp_threshold,
+        is_active=update_data.is_active
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dispositivo '{device_id}' no encontrado o no se pudo actualizar."
+        )
+    return {"success": True, "message": f"Dispositivo '{device_id}' actualizado correctamente."}
+
+
+@router.post("/devices/{device_id}/auto-calibrate", tags=["Acceso Físico"])
+def auto_calibrate_device(
+    device_id: str,
+    target_samples: int = 25,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Calibra empíricamente una cámara en vivo conectándose a su stream_url.
+    Captura muestras faciales reales, calcula el umbral LBP óptimo,
+    lo actualiza en la base de datos y retorna el informe estadístico.
+    """
+    dev = get_iot_device(device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail=f"Dispositivo '{device_id}' no encontrado.")
+
+    stream_url = dev.get("stream_url")
+    if not stream_url or stream_url.strip() in ["", "0"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El dispositivo '{device_id}' no tiene una URL de stream válida configurada (RTSP o HTTP)."
+        )
+
+    try:
+        calib_result = calibrate_camera_stream(stream_url.strip(), target_samples=target_samples)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error durante la calibración: {str(e)}")
+
+    new_threshold = calib_result["optimal_threshold"]
+    update_iot_device(device_id=device_id, lbp_threshold=new_threshold)
+
+    # Actualizar data/cameras.json si existe
+    for path in ["data/cameras.json", "/app/data/cameras.json"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    configs = json.load(f)
+                for c in configs:
+                    if c.get("device_id", "").upper() == device_id.upper():
+                        c["lbp_threshold"] = new_threshold
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=4)
+            except Exception:
+                pass
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "device_name": dev.get("device_name", device_id),
+        "calibration": calib_result,
+        "message": f"Calibración exitosa: nuevo umbral óptimo θ={new_threshold} guardado para '{device_id}'."
     }
 
 
@@ -1021,3 +1129,22 @@ def remove_device_acl(rule_id: int, current_user: dict = Depends(require_admin))
             detail="Regla de acceso no encontrada o no se pudo eliminar."
         )
     return {"success": True, "message": "Regla de acceso eliminada con éxito."}
+
+
+@router.get("/health", tags=["Salud del Sistema"])
+def health_check():
+    """Endpoint de salud del backend y estado de la red Blockchain."""
+    from app.services.blockchain import is_blockchain_available
+    return {
+        "message": "Bienvenido a la API de FaceSentinel",
+        "status": "online",
+        "blockchain": "connected" if is_blockchain_available() else "disconnected",
+        "docs_url": "/docs"
+    }
+
+
+@router.get("/blockchain/info", tags=["Blockchain"])
+def blockchain_contract_info():
+    """Retorna información en tiempo real del Smart Contract y de la red Ethereum (Ganache)."""
+    from app.services.blockchain import get_contract_info
+    return get_contract_info()

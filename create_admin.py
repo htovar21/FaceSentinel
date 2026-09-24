@@ -47,15 +47,17 @@ def main():
         ''')
         
         # Insertar o reemplazar el usuario administrador
+        from datetime import datetime
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id) VALUES (?, ?, ?, ?, ?, NULL)",
-            (args.cedula, args.username, args.name, "Admin", password_hash)
+            "INSERT OR REPLACE INTO users (user_id, username, name, role, password_hash, associated_client_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+            (args.cedula, args.username, args.name, "Admin", password_hash, now, now)
         )
         conn.commit()
         conn.close()
-        print(f"✅ Usuario administrador '{args.username}' ({args.name}) creado correctamente.")
+        print(f"[OK] Usuario administrador '{args.username}' ({args.name}) creado correctamente.")
     except Exception as e:
-        print(f"❌ Error al crear el usuario administrador en la base de datos: {e}", file=sys.stderr)
+        print(f"[ERROR] Error al crear el usuario administrador en la base de datos: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

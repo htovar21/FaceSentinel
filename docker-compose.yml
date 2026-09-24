@@ -30,6 +30,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./app:/app/app
+      - ./blockchain:/app/blockchain
       - ./data:/app/data
       - deepface-cache:/root/.deepface
     env_file:

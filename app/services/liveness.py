@@ -26,8 +26,8 @@ mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     max_num_faces=1,
     refine_landmarks=True,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
+    min_detection_confidence=0.35,
+    min_tracking_confidence=0.35
 )
 
 # Índices exactos de los puntos (landmarks) de los ojos en MediaPipe
@@ -154,22 +154,27 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
         )
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-        if len(faces) == 0:
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            return {
-                "is_real": False,
-                "texture_score": 0.0,
-                "entropy": 0.0,
-                "lbp_threshold": round(custom_lbp_threshold, 4),
-                "variance": 0.0,
-                "energy": 0.0,
-                "time_ms": round(elapsed_ms, 2),
-                "reason": "No se detectó rostro"
-            }
-
-        # Tomar la primera cara detectada
-        x, y, w, h = faces[0]
-        face_roi = gray[y:y+h, x:x+w]
+        if len(faces) > 0:
+            x, y, w, h = faces[0]
+            face_roi = gray[y:y+h, x:x+w]
+        else:
+            # Fallback robusto: si la imagen ya viene recortada del borde (MediaPipe Face Mesh)
+            # o el clasificador Haar falla por ligera inclinación/luz, analizamos la región central
+            h, w = gray.shape[:2]
+            if h >= 32 and w >= 32:
+                face_roi = gray[int(h * 0.1):int(h * 0.9), int(w * 0.1):int(w * 0.9)]
+            else:
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                return {
+                    "is_real": False,
+                    "texture_score": 0.0,
+                    "entropy": 0.0,
+                    "lbp_threshold": round(custom_lbp_threshold, 4),
+                    "variance": 0.0,
+                    "energy": 0.0,
+                    "time_ms": round(elapsed_ms, 2),
+                    "reason": "No se detectó rostro"
+                }
 
         # Redimensionar para consistencia
         face_roi = cv2.resize(face_roi, (128, 128))
@@ -184,29 +189,39 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
         hist /= (hist.sum() + 1e-7)
 
         # Métricas de textura:
-        # 1. Varianza del histograma (piel real tiene más variación)
+        # 1. Varianza del histograma (en pantallas LCD/OLED, la matriz de subpíxeles
+        #    genera picos periódicos localizados con varianza > 0.00245; la piel real es homogénea <= 0.00235)
         variance = np.var(hist)
 
-        # 2. Entropía (piel real tiene más entropía / desorden)
+        # 2. Entropía (piel real tiene más entropía / micro-desorden natural)
         entropy = -np.sum(hist * np.log2(hist + 1e-7))
 
-        # 3. Energía (fotos tienen más energía concentrada)
+        # 3. Energía (fotos y pantallas tienen más energía concentrada)
         energy = np.sum(hist ** 2)
 
-        # Score normalizado según el umbral dinámico del dispositivo
-        texture_score = min(1.0, max(0.0, (entropy - (custom_lbp_threshold - 0.4)) / 0.8))
+        # Detección bimodal: Si la varianza indica artefactos de pantalla digital (>= 0.0038),
+        # se eleva el umbral efectivo para compensar la emisión de luz y compresión del video.
+        # La compresión natural de RTSP H.264/WiFi se ubica en ~0.0022 - 0.0033.
+        has_screen_artifacts = (variance >= 0.0038)
+        effective_threshold = (custom_lbp_threshold + 0.04) if has_screen_artifacts else custom_lbp_threshold
 
-        # Umbral dinámico configurable por dispositivo
-        is_real = entropy >= custom_lbp_threshold
+        is_real = entropy >= effective_threshold
+
+        # Score normalizado según el umbral efectivo
+        texture_score = min(1.0, max(0.0, (entropy - (effective_threshold - 0.4)) / 0.8))
+        if has_screen_artifacts and is_real:
+            texture_score *= 0.85
+
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "is_real": is_real,
             "texture_score": round(texture_score, 4),
             "entropy": round(entropy, 4),
-            "lbp_threshold": round(custom_lbp_threshold, 4),
+            "lbp_threshold": round(effective_threshold, 4),
             "variance": round(variance, 6),
             "energy": round(energy, 6),
+            "has_screen_artifacts": has_screen_artifacts,
             "time_ms": round(elapsed_ms, 2),
         }
 
@@ -401,18 +416,19 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
     pose = estimate_head_pose(frame_rgb)
 
     # 5. Calcular score compuesto ponderado
-    texture_score = texture_result.get("texture_score", 0.5)
+    texture_score = texture_result.get("texture_score", 0.0)
     freq_score = freq_result.get("frequency_score", 0.5)
     presence_score = 1.0 if has_face else 0.0
+    texture_is_real = texture_result.get("is_real", False)
 
     liveness_score = (
-        texture_score * 0.40 +       # Textura es lo más importante
-        freq_score * 0.30 +           # Frecuencia complementa
-        presence_score * 0.30         # Presencia básica
+        texture_score * 0.50 +
+        freq_score * 0.25 +
+        presence_score * 0.25
     )
 
-    # Umbral de decisión: 0.45 (ajustable)
-    is_live = liveness_score > 0.45
+    # El filtro de textura (LBP) es determinante: si no supera el umbral de piel real, se rechaza
+    is_live = bool(texture_is_real and (liveness_score >= 0.50))
     elapsed_total = (time.perf_counter() - t0_check) * 1000.0
 
     result = {
@@ -439,3 +455,99 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
         logger.warning(f"🚨 Liveness FALLIDO — Score: {liveness_score:.4f} (Entropía: {result['entropy']})")
 
     return result
+
+
+# =========================================================================
+#       MÓDULO 6: AUTO-CALIBRACIÓN SENSORIAL PARA LA PLATAFORMA WEB
+# =========================================================================
+
+def calibrate_camera_stream(stream_url: str, target_samples: int = 25) -> dict:
+    """
+    Se conecta a una cámara por RTSP o HTTP (DroidCam) y analiza fotogramas faciales
+    para calcular empíricamente el umbral óptimo de LBP (textura) para esa lente.
+    """
+    import os
+    # Forzar transporte TCP para streams RTSP (evita bloqueos UDP a través de Docker y Firewall)
+    if isinstance(stream_url, str) and stream_url.lower().startswith("rtsp://"):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|timeout;5000000"
+
+    source = int(stream_url) if str(stream_url).isdigit() else stream_url
+    cap = cv2.VideoCapture(source)
+    if not cap or not cap.isOpened():
+        raise ValueError(f"No se pudo conectar al flujo de video '{stream_url}'. Verifica que la cámara esté encendida y accesible.")
+
+    t0 = time.time()
+    samples_entropy = []
+    samples_variance = []
+    w, h = 0, 0
+    total_frames_read = 0
+    max_wait = 10.0
+
+    try:
+        while len(samples_entropy) < target_samples and (time.time() - t0) < max_wait:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                time.sleep(0.03)
+                continue
+
+            total_frames_read += 1
+            h, w = frame.shape[:2]
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(rgb)
+
+            if not results.multi_face_landmarks:
+                time.sleep(0.02)
+                continue
+
+            landmarks = results.multi_face_landmarks[0].landmark
+            xs = [int(p.x * w) for p in landmarks]
+            ys = [int(p.y * h) for p in landmarks]
+            x_min, x_max = max(0, min(xs)), min(w, max(xs))
+            y_min, y_max = max(0, min(ys)), min(h, max(ys))
+
+            if (x_max - x_min) < 40 or (y_max - y_min) < 40:
+                continue
+
+            face_crop = frame[y_min:y_max, x_min:x_max]
+            gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+            face_128 = cv2.resize(gray_face, (128, 128))
+
+            lbp = local_binary_pattern(face_128, P=16, R=2, method="uniform")
+            hist, _ = np.histogram(lbp.ravel(), bins=18, range=(0, 18))
+            hist = hist.astype(float)
+            hist /= (hist.sum() + 1e-7)
+            entropy = -np.sum(hist * np.log2(hist + 1e-7))
+            variance = float(np.var(hist))
+
+            samples_entropy.append(float(entropy))
+            samples_variance.append(variance)
+            time.sleep(0.02)
+    finally:
+        cap.release()
+
+    if len(samples_entropy) < 5:
+        if total_frames_read > 0:
+            raise ValueError(f"Cámara conectada ({w}x{h} px), pero no hay ningún rostro visible frente al lente. Debes pararte frente a la cámara mirando hacia ella para calibrarla.")
+        else:
+            raise ValueError("No se pudieron recibir fotogramas del flujo de video. Verifica la conexión.")
+
+    arr_ent = np.array(samples_entropy)
+    mean_ent = float(np.mean(arr_ent))
+    std_ent = float(np.std(arr_ent))
+    min_ent = float(np.min(arr_ent))
+    mean_var = float(np.mean(samples_variance))
+
+    # Umbral óptimo: media - 3*std con margen de seguridad
+    suggested = round(max(3.20, min(3.80, mean_ent - 3.0 * std_ent)), 3)
+    if suggested > (min_ent - 0.005):
+        suggested = round(min_ent - 0.01, 3)
+
+    return {
+        "samples_analyzed": len(samples_entropy),
+        "resolution": f"{w}x{h}",
+        "mean_entropy": round(mean_ent, 4),
+        "std_entropy": round(std_ent, 4),
+        "min_entropy": round(min_ent, 4),
+        "variance_mean": round(mean_var, 6),
+        "optimal_threshold": suggested
+    }

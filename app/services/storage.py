@@ -123,6 +123,8 @@ class IoTDevice(Base):
     token_lookup_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     # Umbral dinámico LBP configurable por sensor (en BD existentes requiere: ALTER TABLE iot_devices ADD COLUMN lbp_threshold FLOAT DEFAULT 3.2;)
     lbp_threshold: Mapped[float] = mapped_column(Float, default=3.2)
+    # URL del stream RTSP o HTTP para cámaras de vigilancia
+    stream_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -156,16 +158,16 @@ def init_sqlite():
     # Auto-seeding: Crear administrador por defecto si no existe ninguno
     try:
         with SessionLocal() as db:
-            admin_exists = db.execute(select(User).where(func.lower(User.role) == "admin")).scalars().first()
-            if not admin_exists:
-                import os
-                from app.core.security import hash_client_secret
-                default_username = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
-                default_password = os.getenv("INITIAL_ADMIN_PASSWORD", "admin123")
-                default_name = os.getenv("INITIAL_ADMIN_NAME", "Administrador del Sistema")
-                default_id = os.getenv("INITIAL_ADMIN_ID", "ADMIN001")
+            import os
+            from app.core.security import hash_client_secret
+            default_username = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
+            default_password = os.getenv("INITIAL_ADMIN_PASSWORD", "admin123")
+            default_name = os.getenv("INITIAL_ADMIN_NAME", "Administrador del Sistema")
+            default_id = os.getenv("INITIAL_ADMIN_ID", "ADMIN001")
 
-                admin_user = User(
+            admin_user = db.execute(select(User).where(User.username == default_username)).scalars().first()
+            if not admin_user:
+                new_admin = User(
                     user_id=default_id,
                     username=default_username,
                     name=default_name,
@@ -173,7 +175,7 @@ def init_sqlite():
                     password_hash=hash_client_secret(default_password),
                     associated_client_id=None
                 )
-                db.add(admin_user)
+                db.add(new_admin)
                 db.commit()
                 logger.info(f"🔑 Administrador inicial creado exitosamente -> Usuario: '{default_username}' | Contraseña: '{default_password}'")
     except Exception as e:
@@ -542,6 +544,7 @@ def save_iot_device(
     client_secret_hash: str,
     token_plain: Optional[str] = None,
     lbp_threshold: float = 3.2,
+    stream_url: Optional[str] = None,
     is_active: bool = True
 ) -> bool:
     """Guarda o actualiza un dispositivo IoT en la base de datos."""
@@ -556,6 +559,8 @@ def save_iot_device(
                 device.location = location
                 device.client_secret_hash = client_secret_hash
                 device.lbp_threshold = lbp_threshold
+                if stream_url is not None:
+                    device.stream_url = stream_url
                 if lookup_hash is not None:
                     device.token_lookup_hash = lookup_hash
                 device.is_active = is_active
@@ -569,6 +574,7 @@ def save_iot_device(
                     client_secret_hash=client_secret_hash,
                     token_lookup_hash=lookup_hash,
                     lbp_threshold=lbp_threshold,
+                    stream_url=stream_url,
                     is_active=is_active
                 )
                 session.add(device)
@@ -578,6 +584,40 @@ def save_iot_device(
         except Exception as e:
             session.rollback()
             logger.error(f"❌ Error al guardar dispositivo IoT: {e}")
+            return False
+
+
+def update_iot_device(
+    device_id: str,
+    device_name: Optional[str] = None,
+    location: Optional[str] = None,
+    stream_url: Optional[str] = None,
+    lbp_threshold: Optional[float] = None,
+    is_active: Optional[bool] = None
+) -> bool:
+    """Actualiza campos específicos de un dispositivo IoT existente."""
+    with SessionLocal() as session:
+        device = session.get(IoTDevice, device_id)
+        if not device:
+            return False
+        try:
+            if device_name is not None:
+                device.device_name = device_name
+            if location is not None:
+                device.location = location
+            if stream_url is not None:
+                device.stream_url = stream_url
+            if lbp_threshold is not None:
+                device.lbp_threshold = lbp_threshold
+            if is_active is not None:
+                device.is_active = is_active
+            device.updated_at = datetime.utcnow()
+            session.commit()
+            logger.info(f"🔄 Dispositivo IoT '{device_id}' actualizado.")
+            return True
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error al actualizar dispositivo IoT: {e}")
             return False
 
 
@@ -593,6 +633,7 @@ def get_iot_device(device_id: str) -> Optional[dict]:
                 "location": device.location,
                 "client_secret_hash": device.client_secret_hash,
                 "lbp_threshold": getattr(device, "lbp_threshold", 3.2),
+                "stream_url": getattr(device, "stream_url", None),
                 "is_active": device.is_active,
                 "created_at": device.created_at,
                 "updated_at": device.updated_at
@@ -743,6 +784,7 @@ def get_all_devices() -> list[dict]:
                 "device_type": d.device_type,
                 "location": d.location,
                 "lbp_threshold": getattr(d, "lbp_threshold", 3.2),
+                "stream_url": getattr(d, "stream_url", None),
                 "is_active": d.is_active,
                 "created_at": d.created_at
             }

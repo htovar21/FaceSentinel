@@ -120,9 +120,19 @@ class IoTDeviceCreate(BaseModel):
     """Modelo para registrar un nuevo dispositivo IoT."""
     device_id: str = Field(..., description="Identificador único del dispositivo de hardware")
     device_name: str = Field(..., description="Nombre descriptivo del punto de acceso")
-    device_type: str = Field("door", description="Tipo de hardware (door, camera, turnstile, gateway)")
+    device_type: str = Field("camera", description="Tipo de hardware (door, camera, turnstile, gateway)")
     location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
-    lbp_threshold: float = Field(3.2, description="Umbral de entropía LBP configurado para el sensor óptico del dispositivo")
+    stream_url: Optional[str] = Field(None, description="URL del stream de video RTSP o HTTP de la cámara")
+    lbp_threshold: float = Field(3.670, description="Umbral de entropía LBP configurado para el sensor óptico del dispositivo")
+
+
+class IoTDeviceUpdate(BaseModel):
+    """Modelo para actualizar la configuración de un dispositivo IoT o su calibración."""
+    device_name: Optional[str] = Field(None, description="Nombre descriptivo del punto de acceso")
+    location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
+    stream_url: Optional[str] = Field(None, description="URL del stream de video RTSP o HTTP")
+    lbp_threshold: Optional[float] = Field(None, description="Nuevo umbral de calibración óptica LBP")
+    is_active: Optional[bool] = Field(None, description="Estado de activación del punto de acceso")
 
 
 class ACLRuleCreate(BaseModel):

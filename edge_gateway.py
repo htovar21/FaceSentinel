@@ -35,7 +35,13 @@ if not DEVICE_TOKEN:
         "Ejemplo: set HW_CLIENT_SECRET=hw_xxxxx"
     )
 
-WEBCAM_INDEX    = 0       # Índice de la cámara
+DEFAULT_RTSP_URL = "rtsp://admin1:cimos.1979@192.168.70.10:554/Streaming/Channels/201"
+_raw_src = os.environ.get("FACESENTINEL_VIDEO_SOURCE", os.environ.get("FACESENTINEL_WEBCAM_INDEX", DEFAULT_RTSP_URL))
+try:
+    WEBCAM_SOURCE = int(_raw_src)
+except ValueError:
+    WEBCAM_SOURCE = _raw_src
+
 FRAME_WIDTH     = 480     # Resolución reducida → <65% CPU en RPi 4
 FRAME_HEIGHT    = 360
 COOLDOWN_TIME   = 4.0     # Segundos de espera post-envío (anti-spam)
@@ -43,8 +49,8 @@ STATUS_DURATION = 3.5     # Cuánto tiempo se mantiene el resultado en pantalla
 MARGIN_PCT      = 0.15    # Margen alrededor del rostro para el recorte final
 
 # -- Parámetros de la máquina de estados EAR --
-EAR_THRESHOLD   = 0.20    # Ratio debajo del cual el ojo se considera "cerrado"
-CONSEC_FRAMES   = 2       # Frames consecutivos bajo umbral para confirmar cierre
+EAR_THRESHOLD   = float(os.environ.get("FACESENTINEL_EAR_THRESHOLD", "0.24"))  # Ratio de cierre (configurable)
+CONSEC_FRAMES   = 1       # Frames bajo umbral para confirmar (ideal para streams WiFi / DroidCam)
 PRE_BLINK_BUF   = 5       # Tamaño del buffer de frames anteriores al cierre
                           # El frame capturado vendrá de AQUÍ (ojos abiertos y estables)
 
@@ -123,31 +129,36 @@ class BlinkStateMachine:
         self.ear_open_val  = 0.30
         self.ear_blink_val = 0.20
 
-    def update(self, ear: float, frame_bgr) -> bool:
+    def update(self, ear: float, frame_bgr, face_crop=None) -> bool:
         """
-        Actualiza la FSM con el EAR del frame actual y el frame BGR.
+        Actualiza la FSM con el EAR del frame actual, el frame BGR y el recorte del rostro.
         Retorna True exactamente una vez: cuando se completa un parpadeo.
         """
-        # Acumular frames antes del cierre (buffer circular)
-        self.pre_blink_buf.append(frame_bgr.copy())
+        # Umbral adaptativo según la anatomía ocular del usuario
+        effective_threshold = max(0.16, min(EAR_THRESHOLD, self.ear_open_val * 0.85))
 
         if self.state == self.OPEN:
-            if ear >= EAR_THRESHOLD:
-                self.ear_open_val = ear
+            if ear >= effective_threshold:
+                self.ear_open_val = 0.85 * self.ear_open_val + 0.15 * ear
+                # Acumular recorte de rostro óptimo con ojos abiertos
+                if face_crop is not None and getattr(face_crop, "size", 0) > 0:
+                    self.pre_blink_buf.append(face_crop.copy())
+                else:
+                    self.pre_blink_buf.append(frame_bgr.copy())
             else:
                 self.state        = self.CLOSING
                 self.closed_count = 1
                 self.ear_blink_val = ear
 
         elif self.state == self.CLOSING:
-            if ear < EAR_THRESHOLD:
+            if ear < effective_threshold:
                 self.closed_count += 1
                 if ear < self.ear_blink_val:
                     self.ear_blink_val = ear
             else:
                 if self.closed_count >= CONSEC_FRAMES:
-                    # Parpadeo confirmado — tomar frame pre-cierre (ojos abiertos)
-                    self.capture_frame = self.pre_blink_buf[0]
+                    # Parpadeo confirmado — tomar recorte pre-cierre (ojos bien abiertos)
+                    self.capture_frame = self.pre_blink_buf[0] if len(self.pre_blink_buf) > 0 else frame_bgr
                     self.state         = self.BLINKED
                     return True
                 else:
@@ -293,9 +304,25 @@ def main():
     print("   [Q/ESC] Salir")
     print("=========================================================================\n")
 
-    cap = cv2.VideoCapture(WEBCAM_INDEX)
-    if not cap.isOpened():
-        print(f"❌ Error: No se pudo acceder a la webcam #{WEBCAM_INDEX}.")
+    # Intentar abrir la fuente de video (cámara, IP cam o archivo)
+    cap = None
+    if isinstance(WEBCAM_SOURCE, int):
+        cap = cv2.VideoCapture(WEBCAM_SOURCE, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(WEBCAM_SOURCE)
+    else:
+        cap = cv2.VideoCapture(WEBCAM_SOURCE)
+
+    if not cap or not cap.isOpened():
+        print(f"❌ Error: No se pudo acceder a la fuente de video: '{WEBCAM_SOURCE}'.")
+        print("\n💡 Diagnóstico y Soluciones:")
+        print("   1. Conecta tu cámara web USB o verifica que el cable esté firme.")
+        print("   2. Revisa que ninguna otra aplicación (ej. el navegador web o Zoom) esté usando la cámara.")
+        print("   3. Si tu laptop tiene tecla de privacidad (Fn+F6, Fn+F10 o switch físico), actívalo.")
+        print("   4. Alternativa con Smartphone (DroidCam / Iriun Webcam):")
+        print("      $env:FACESENTINEL_VIDEO_SOURCE = 'http://192.168.1.X:4747/video'")
+        print("   5. Alternativa con video pregrabado (MP4):")
+        print("      $env:FACESENTINEL_VIDEO_SOURCE = 'video_prueba.mp4'")
         return
 
     # Reducir resolución → menor CPU en dispositivo de borde
@@ -305,7 +332,7 @@ def main():
     # Estado compartido entre hilo principal e hilo HTTP (protegido por lock)
     state = {
         "auth_status"            : None,
-        "status_msg"             : "PARPADEA PARA AUTENTICARTE",
+        "status_msg"             : "PARPADEA O PULSA [ESPACIO]",
         "user_info"              : "",
         "last_auth_time"         : 0.0,
         "test_type"              : "LIVE_USER",
@@ -336,10 +363,23 @@ def main():
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
-            print("⚠️ Frame vacío — reintentando...")
+            if isinstance(WEBCAM_SOURCE, str) and not (str(WEBCAM_SOURCE).startswith("http") or str(WEBCAM_SOURCE).startswith("rtsp")):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            print("⚠️ Frame vacío o reconectando flujo de red...")
+            time.sleep(0.05)
             continue
 
-        frame = cv2.flip(frame, 1)
+        # Si es cámara web USB física, reflejar en modo selfie; si es cámara IP/RTSP, mantener vista real
+        if isinstance(WEBCAM_SOURCE, int):
+            frame = cv2.flip(frame, 1)
+
+        # Optimizar resolución para MediaPipe y tiempo real si la cámara transmite en alta definición (ej. 1440x1280)
+        h_orig, w_orig = frame.shape[:2]
+        if w_orig > 640:
+            scale = 640.0 / w_orig
+            frame = cv2.resize(frame, (640, int(h_orig * scale)))
+
         h, w  = frame.shape[:2]
         rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         now   = time.time()
@@ -357,7 +397,7 @@ def main():
         if auth_status in ("GRANTED", "DENIED") and (now - last_auth > STATUS_DURATION):
             with state_lock:
                 state["auth_status"] = None
-                state["status_msg"]  = "PARPADEA PARA AUTENTICARTE"
+                state["status_msg"]  = "PARPADEA O PULSA [ESPACIO]"
                 state["user_info"]   = ""
             blink_fsm.reset()
             auth_status = None
@@ -377,7 +417,7 @@ def main():
             face_lm       = mesh_results.multi_face_landmarks[0]
             face_in_frame = True
             ear_value     = get_avg_ear(face_lm)
-            _, box_coords = crop_face_from_mesh(frame, face_lm)
+            curr_crop, box_coords = crop_face_from_mesh(frame, face_lm)
 
             # Actualizar FSM solo cuando no estamos en cooldown ni procesando
             can_auth = (
@@ -387,13 +427,13 @@ def main():
 
             if can_auth and blink_fsm.state != BlinkStateMachine.BLINKED:
                 t0_edge_total = time.perf_counter()
-                blinked = blink_fsm.update(ear_value, frame)
+                blinked = blink_fsm.update(ear_value, frame, curr_crop)
 
                 if blinked and blink_fsm.capture_frame is not None:
-                    # Extraer rostro del frame pre-parpadeo (ojos abiertos)
-                    face_crop, _ = crop_face_from_mesh(blink_fsm.capture_frame, face_lm)
-                    if face_crop is None:
-                        face_crop = blink_fsm.capture_frame  # Fallback: frame completo
+                    # El frame pre-parpadeo ya contiene el rostro nítido con ojos abiertos
+                    face_crop = blink_fsm.capture_frame
+                    if face_crop is None or getattr(face_crop, "size", 0) == 0:
+                        face_crop = curr_crop if curr_crop is not None else frame
 
                     if face_crop.size > 0:
                         # Marcar cooldown ANTES de lanzar el hilo (evita doble envío)
@@ -482,6 +522,46 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q") or key == 27:
             break
+        elif key == 32:  # Barra espaciadora: Disparo manual inmediato
+            if face_in_frame:
+                t0_edge_total = time.perf_counter()
+                face_crop, _ = crop_face_from_mesh(frame, face_lm)
+                if face_crop is None:
+                    face_crop = frame
+
+                if face_crop.size > 0:
+                    with state_lock:
+                        state["auth_status"]    = "PROCESSING"
+                        state["status_msg"]     = "PROCESANDO (MANUAL)..."
+                        state["last_auth_time"] = now
+                    last_auth = now
+
+                    _, buf  = cv2.imencode(".jpg", face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                    b64_img = base64.b64encode(buf).decode("utf-8")
+                    t_edge_total_ms = (time.perf_counter() - t0_edge_total) * 1000.0
+
+                    print(f"\n⚡ Disparo manual activado con [ESPACIO] (EAR={ear_value:.3f}). Enviando a FaceSentinel...")
+
+                    telemetry_payload = {
+                        "test_type": curr_test_type,
+                        "environmental_condition": curr_env_cond,
+                        "edge_ear_time_ms": round(t_ear_edge_ms, 2),
+                        "edge_total_time_ms": round(t_edge_total_ms, 2),
+                        "ear_open_value": round(ear_value, 4),
+                        "ear_blink_value": round(ear_value, 4),
+                    }
+
+                    threading.Thread(
+                        target=send_auth_request,
+                        args=(b64_img, telemetry_payload, {
+                            "on_granted": on_granted,
+                            "on_denied" : on_denied,
+                            "on_error"  : on_error,
+                        }),
+                        daemon=True
+                    ).start()
+            else:
+                print("⚠️ [ESPACIO]: No se detecta ningún rostro en este fotograma.")
         elif key == ord("1"):
             with state_lock:
                 state["test_type"] = "LIVE_USER"

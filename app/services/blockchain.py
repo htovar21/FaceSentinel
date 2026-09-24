@@ -188,8 +188,14 @@ def init_blockchain():
 
 
 def is_blockchain_available() -> bool:
-    """Verifica si el servicio de blockchain está disponible."""
-    return _initialized and _w3 is not None and _w3.is_connected()
+    """Verifica si el servicio de blockchain está disponible y reconecta automáticamente si es necesario."""
+    global _initialized, _w3
+    if not _initialized or _w3 is None or not _w3.is_connected():
+        try:
+            init_blockchain()
+        except Exception:
+            pass
+    return bool(_initialized and _w3 is not None and _w3.is_connected())
 
 
 # =========================================================================
@@ -441,7 +447,7 @@ def get_contract_info() -> dict:
     try:
         return {
             "connected": True,
-            "contract_address": settings.SMART_CONTRACT_ADDRESS,
+            "contract_address": getattr(_contract, "address", settings.SMART_CONTRACT_ADDRESS),
             "network": settings.BLOCKCHAIN_RPC_URL,
             "chain_id": settings.CHAIN_ID,
             "total_records": _contract.functions.totalRecords().call(),
