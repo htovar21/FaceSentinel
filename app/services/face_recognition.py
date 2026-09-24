@@ -55,18 +55,24 @@ def get_embedding(img_array):
     """Usa DeepFace (ArcFace) para extraer el vector matemático del rostro y mide el tiempo empleado."""
     t0 = time.perf_counter()
     try:
-        representations = DeepFace.represent(
-            img_path=img_array,
-            model_name=settings.AI_MODEL_NAME,
-            enforce_detection=True
-        )
+        try:
+            representations = DeepFace.represent(
+                img_path=img_array,
+                model_name=settings.AI_MODEL_NAME,
+                enforce_detection=True
+            )
+        except ValueError:
+            # Si el detector OpenCV no detecta el rostro (común en recortes tight o cámaras con ángulo),
+            # procesamos directamente el recorte centrado sin forzar re-detección
+            representations = DeepFace.represent(
+                img_path=img_array,
+                model_name=settings.AI_MODEL_NAME,
+                enforce_detection=False
+            )
         embedding = representations[0]["embedding"]
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         logger.debug(f"Embedding extraído ({elapsed_ms:.1f}ms): vector de {len(embedding)} dimensiones")
         return embedding, elapsed_ms
-    except ValueError:
-        logger.warning("No se detectó ningún rostro en la imagen")
-        return None, (time.perf_counter() - t0) * 1000.0
     except Exception as e:
         logger.error(f"Error en DeepFace.represent: {e}")
         return None, (time.perf_counter() - t0) * 1000.0
@@ -167,6 +173,12 @@ def verify_face(image_data):
 
     if distance < settings.FACE_MATCH_THRESHOLD:
         user_info = get_user_by_id(matched_id)
+        if not user_info and "_" in matched_id:
+            base_id = matched_id.split("_")[0]
+            user_info = get_user_by_id(base_id)
+            if user_info:
+                matched_id = base_id
+
         if user_info:
             logger.info(f"✅ Identidad confirmada: {user_info['name']} (distancia: {distance:.4f})")
             return {

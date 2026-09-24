@@ -5,7 +5,7 @@
         "token": "hw_tlfhector_secret_key_8832a74ayV8",
         "source": "http://192.168.80.89:4747/video",
         "location": "Punto de Acceso M\u00f3vil",
-        "enabled": true
+        "enabled": false
     },
     {
         "device_id": "PASILLO62",

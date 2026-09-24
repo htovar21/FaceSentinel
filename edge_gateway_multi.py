@@ -60,15 +60,15 @@ def eye_aspect_ratio(landmarks, eye_indices, img_w, img_h) -> float:
     C = np.linalg.norm(pts[0] - pts[3])
     return float((A + B) / (2.0 * C)) if C > 0 else 0.0
 
-def crop_face(frame_bgr, face_landmarks):
+def crop_face(frame_bgr, face_landmarks, margin_pct: float = 0.35):
     h, w = frame_bgr.shape[:2]
     xs = [lm.x * w for lm in face_landmarks.landmark]
     ys = [lm.y * h for lm in face_landmarks.landmark]
     x_min, x_max = int(min(xs)), int(max(xs))
     y_min, y_max = int(min(ys)), int(max(ys))
 
-    margin_x = int((x_max - x_min) * 0.20)
-    margin_y = int((y_max - y_min) * 0.30)
+    margin_x = int((x_max - x_min) * margin_pct)
+    margin_y = int((y_max - y_min) * margin_pct)
 
     x1 = max(0, x_min - margin_x)
     y1 = max(0, y_min - margin_y)
@@ -206,7 +206,8 @@ class CameraWorker(threading.Thread):
                 time.sleep(0.1)
                 continue
 
-            # Reducir resolución para mantener FPS alto en multi-cámara
+            orig_frame = frame.copy()
+            # Reducir resolución para mantener FPS alto en el procesamiento MediaPipe
             if frame.shape[1] > 640:
                 frame = cv2.resize(frame, (640, int(frame.shape[0] * 640 / frame.shape[1])))
 
@@ -226,10 +227,10 @@ class CameraWorker(threading.Thread):
                 ear_l = eye_aspect_ratio(lm.landmark, LEFT_EYE_IDX, w, h)
                 ear_r = eye_aspect_ratio(lm.landmark, RIGHT_EYE_IDX, w, h)
                 ear_val = (ear_l + ear_r) / 2.0
-                _, box = crop_face(frame, lm)
+                _, box = crop_face(frame, lm, margin_pct=0.20)
 
-                # Máquina de estados de parpadeo adaptativa
-                self.pre_blink_buf.append(frame.copy())
+                # Máquina de estados de parpadeo adaptativa (guardar fotograma en alta resolución)
+                self.pre_blink_buf.append(orig_frame)
                 eff_threshold = max(0.16, min(0.24, self.ear_open_val * 0.85))
 
                 now = time.time()
@@ -250,9 +251,9 @@ class CameraWorker(threading.Thread):
                             self.ear_blink_val = ear_val
                     else:
                         if closed_count >= 1 and can_auth:
-                            # Parpadeo completado -> Disparar autenticación
-                            auth_frame = self.pre_blink_buf[0] if len(self.pre_blink_buf) > 0 else frame
-                            face_crop_img, _ = crop_face(auth_frame, lm)
+                            # Parpadeo completado -> Disparar autenticación con recorte HD
+                            auth_frame = self.pre_blink_buf[0] if len(self.pre_blink_buf) > 0 else orig_frame
+                            face_crop_img, _ = crop_face(auth_frame, lm, margin_pct=0.35)
                             if face_crop_img is None:
                                 face_crop_img = auth_frame
 
