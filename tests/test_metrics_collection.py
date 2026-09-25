@@ -138,7 +138,7 @@ def test_export_confusion_matrix_and_latex():
     with open(TEX_REPORT_PATH, "r", encoding="utf-8") as f:
         tex = f.read()
         assert "\\begin{table}" in tex
-        assert "\\label{tab:confusion_matrix}" in tex
+        assert "\\label{tab:matriz_confusion}" in tex
         assert "\\label{tab:metricas_biometricas}" in tex
         assert "\\label{tab:latencias_pipeline}" in tex
         assert "\\label{tab:blockchain_metrics}" in tex

@@ -63,34 +63,83 @@ def base64_to_image(base64_string: str):
 # =========================================================================
 
 def get_embedding(img_array):
-    """Usa DeepFace (ArcFace) para extraer el vector matemático del rostro y mide el tiempo empleado."""
+    """
+    Usa DeepFace (ArcFace) para extraer el vector matemático del rostro (512-d).
+    Aplica detección facial en cascada (OpenCV Haar/DNN -> MediaPipe FaceMesh sobre RGB).
+    Garantiza que NUNCA se extraiga un vector sobre imágenes no alineadas o sin rostro
+    (evitando vectores degenerados y falsas aceptaciones en el matching).
+    """
     t0 = time.perf_counter()
+    if img_array is None or not isinstance(img_array, np.ndarray) or img_array.size == 0:
+        return None, 0.0
+
+    # 1. Intento primario: Detector OpenCV nativo con alineación forzada
     try:
-        try:
-            representations = DeepFace.represent(
-                img_path=img_array,
-                model_name=settings.AI_MODEL_NAME,
-                detector_backend="mediapipe",
-                align=True,
-                enforce_detection=True
-            )
-        except ValueError:
-            # Si mediapipe no detecta el rostro con detección forzada,
-            # procesamos el recorte centrado asegurando align=True
-            representations = DeepFace.represent(
-                img_path=img_array,
-                model_name=settings.AI_MODEL_NAME,
-                detector_backend="mediapipe",
-                align=True,
-                enforce_detection=False
-            )
-        embedding = representations[0]["embedding"]
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        logger.debug(f"Embedding extraído ({elapsed_ms:.1f}ms): vector de {len(embedding)} dimensiones")
-        return embedding, elapsed_ms
-    except Exception as e:
-        logger.error(f"Error en DeepFace.represent: {e}")
-        return None, (time.perf_counter() - t0) * 1000.0
+        representations = DeepFace.represent(
+            img_path=img_array,
+            model_name=settings.AI_MODEL_NAME,
+            detector_backend="opencv",
+            align=True,
+            enforce_detection=True
+        )
+        if representations and "embedding" in representations[0]:
+            embedding = representations[0]["embedding"]
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            logger.debug(f"Embedding extraído con OpenCV ({elapsed_ms:.1f}ms): vector de {len(embedding)} dimensiones")
+            return embedding, elapsed_ms
+    except Exception as e_opencv:
+        logger.debug(f"Detector OpenCV no detectó rostro: {e_opencv}. Intentando fallback FaceMesh...")
+
+    # 2. Intento secundario: Fallback con MediaPipe FaceMesh para recortes difíciles o iluminación variable
+    try:
+        import mediapipe as mp
+        rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+        with mp.solutions.face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5
+        ) as fm:
+            mesh_results = fm.process(rgb)
+            if mesh_results.multi_face_landmarks:
+                h, w = img_array.shape[:2]
+                lms = mesh_results.multi_face_landmarks[0].landmark
+                xs = [lm.x * w for lm in lms]
+                ys = [lm.y * h for lm in lms]
+                x1 = max(0, int(min(xs)))
+                y1 = max(0, int(min(ys)))
+                x2 = min(w, int(max(xs)))
+                y2 = min(h, int(max(ys)))
+                fw = x2 - x1
+                fh = y2 - y1
+                if fw >= 30 and fh >= 30:
+                    margin_x = int(fw * 0.20)
+                    margin_y = int(fh * 0.20)
+                    crop_x1 = max(0, x1 - margin_x)
+                    crop_y1 = max(0, y1 - margin_y)
+                    crop_x2 = min(w, x2 + margin_x)
+                    crop_y2 = min(h, y2 + margin_y)
+                    face_crop = img_array[crop_y1:crop_y2, crop_x1:crop_x2]
+                    if face_crop.size > 0:
+                        representations = DeepFace.represent(
+                            img_path=face_crop,
+                            model_name=settings.AI_MODEL_NAME,
+                            detector_backend="skip",
+                            align=True,
+                            enforce_detection=False
+                        )
+                        if representations and "embedding" in representations[0]:
+                            embedding = representations[0]["embedding"]
+                            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                            logger.debug(f"Embedding extraído con FaceMesh fallback ({elapsed_ms:.1f}ms)")
+                            return embedding, elapsed_ms
+    except Exception as e_mesh:
+        logger.debug(f"Fallback FaceMesh error: {e_mesh}")
+
+    # Si ningún detector verificó la presencia anatómica de un rostro real:
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    logger.warning(f"Rostro no detectado por ningún detector ({elapsed_ms:.1f}ms).")
+    return None, elapsed_ms
 
 
 # =========================================================================

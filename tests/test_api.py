@@ -187,6 +187,46 @@ class TestSecurityHardening:
         # Limpieza
         client.delete(f"/api/v1/devices/{device_id}", headers=admin_headers)
 
+    def test_physical_access_corrupted_frame_returns_422(self, client, admin_headers):
+        """Valida que un fotograma corrupto retorne HTTP 422 en vez de registrar falso spoofing."""
+        import secrets
+        import base64
+        import cv2
+        import numpy as np
+
+        device_id = f"test_dev_{secrets.token_hex(4)}"
+        reg_payload = {
+            "device_id": device_id,
+            "device_name": "Torniquete Corrupt Test",
+            "device_type": "door",
+            "location": "Entrada",
+            "antispoofing_enabled": True
+        }
+        res = client.post("/api/v1/devices", json=reg_payload, headers=admin_headers)
+        assert res.status_code == 200
+        raw_secret = res.json()["client_secret"]
+
+        # Crear imagen corrupta / plana (negro absoluto)
+        blank = np.zeros((240, 240, 3), dtype=np.uint8)
+        _, buf = cv2.imencode(".jpg", blank)
+        b64_blank = base64.b64encode(buf).decode("utf-8")
+
+        auth_payload = {
+            "image_base64": b64_blank,
+            "test_type": "LIVE_USER",
+            "environmental_condition": "NORMAL"
+        }
+        auth_res = client.post(
+            "/api/v1/physical-access/authenticate",
+            json=auth_payload,
+            headers={"Authorization": f"Bearer {raw_secret}"}
+        )
+        assert auth_res.status_code == 422
+        assert "corrupto" in auth_res.json()["detail"].lower()
+
+        # Limpieza
+        client.delete(f"/api/v1/devices/{device_id}", headers=admin_headers)
+
 
 # =========================================================================
 #                    EJECUCIÓN

@@ -14,6 +14,7 @@ interface IoTDevice {
     location: string | null
     stream_url?: string | null
     lbp_threshold?: number
+    antispoofing_enabled?: boolean
     is_active: boolean
     created_at: string
 }
@@ -30,6 +31,7 @@ export default function IoTDevicesView() {
     const [location, setLocation] = useState("")
     const [streamUrl, setStreamUrl] = useState("")
     const [lbpThreshold, setLbpThreshold] = useState("3.670")
+    const [antispoofingEnabled, setAntispoofingEnabled] = useState(true)
     const [registering, setRegistering] = useState(false)
 
     // Modal de edición / calibración
@@ -37,6 +39,7 @@ export default function IoTDevicesView() {
     const [editThreshold, setEditThreshold] = useState("3.670")
     const [editStreamUrl, setEditStreamUrl] = useState("")
     const [editLocation, setEditLocation] = useState("")
+    const [editAntispoofing, setEditAntispoofing] = useState(true)
     const [editActive, setEditActive] = useState(true)
     const [savingEdit, setSavingEdit] = useState(false)
     const [syncing, setSyncing] = useState(false)
@@ -68,7 +71,9 @@ export default function IoTDevicesView() {
             token: KNOWN_TOKENS[d.device_id] || (newDeviceSecret && d.device_id === deviceId ? newDeviceSecret : `hw_${d.device_id.toLowerCase()}_token_aqui`),
             source: d.stream_url || "0",
             location: d.location || "Punto de Acceso",
-            enabled: Boolean(d.stream_url && d.stream_url.trim() !== "" && d.is_active)
+            enabled: Boolean(d.stream_url && d.stream_url.trim() !== "" && d.is_active),
+            antispoofing_enabled: d.antispoofing_enabled !== false,
+            lbp_threshold: d.lbp_threshold ?? 3.670
         }))
     }
 
@@ -119,7 +124,8 @@ export default function IoTDevicesView() {
                 device_type: deviceType,
                 location: location.trim() || null,
                 stream_url: streamUrl.trim() || null,
-                lbp_threshold: parseFloat(lbpThreshold) || 3.670
+                lbp_threshold: parseFloat(lbpThreshold) || 3.670,
+                antispoofing_enabled: antispoofingEnabled
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
@@ -131,6 +137,7 @@ export default function IoTDevicesView() {
             setLocation("")
             setStreamUrl("")
             setLbpThreshold("3.670")
+            setAntispoofingEnabled(true)
             fetchDevices()
         } catch (err: any) {
             setError(err.response?.data?.detail || "Error al registrar el dispositivo físico.")
@@ -144,6 +151,7 @@ export default function IoTDevicesView() {
         setEditThreshold(String(device.lbp_threshold || 3.670))
         setEditStreamUrl(device.stream_url || "")
         setEditLocation(device.location || "")
+        setEditAntispoofing(device.antispoofing_enabled !== false)
         setEditActive(device.is_active)
         setCalibResult(null)
         setCalibError("")
@@ -161,6 +169,22 @@ export default function IoTDevicesView() {
             fetchDevices()
         } catch (err: any) {
             alert(err.response?.data?.detail || "Error al actualizar estado del dispositivo.")
+            fetchDevices()
+        }
+    }
+
+    const handleToggleAntispoofing = async (device: IoTDevice) => {
+        const newAntispoofingState = device.antispoofing_enabled === false ? true : false
+        setDevices(prev => prev.map(d => d.device_id === device.device_id ? { ...d, antispoofing_enabled: newAntispoofingState } : d))
+        try {
+            await axios.patch(`${baseUrl}/api/v1/devices/${device.device_id}`, {
+                antispoofing_enabled: newAntispoofingState
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            fetchDevices()
+        } catch (err: any) {
+            alert(err.response?.data?.detail || "Error al actualizar política anti-spoofing del dispositivo.")
             fetchDevices()
         }
     }
@@ -210,6 +234,7 @@ export default function IoTDevicesView() {
                 lbp_threshold: parseFloat(editThreshold) || 3.670,
                 stream_url: editStreamUrl.trim() || null,
                 location: editLocation.trim() || null,
+                antispoofing_enabled: editAntispoofing,
                 is_active: editActive
             }, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -379,6 +404,23 @@ export default function IoTDevicesView() {
                                     onChange={e => setLocation(e.target.value)}
                                 />
                             </div>
+                            <div className="flex items-center justify-between p-2 rounded-lg border bg-muted/30">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-semibold cursor-pointer">Seguridad Anti-Spoofing</Label>
+                                    <p className="text-[10px] text-muted-foreground">
+                                        {antispoofingEnabled ? "Validación LBP activa (Seguro)" : "Bypass LBP (Match directo <200ms)"}
+                                    </p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={antispoofingEnabled ? "default" : "outline"}
+                                    className={`h-7 px-3 text-xs ${antispoofingEnabled ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "border-amber-500/50 text-amber-600"}`}
+                                    onClick={() => setAntispoofingEnabled(!antispoofingEnabled)}
+                                >
+                                    {antispoofingEnabled ? "LBP Activo" : "Bypass (<200ms)"}
+                                </Button>
+                            </div>
                             <Button type="submit" className="w-full mt-2" disabled={registering}>
                                 {registering ? "Registrando..." : "Registrar Dispositivo"}
                             </Button>
@@ -428,6 +470,7 @@ export default function IoTDevicesView() {
                                             <th className="px-3 py-2.5 rounded-tl-md">Punto / ID</th>
                                             <th className="px-3 py-2.5">Stream / Tipo</th>
                                             <th className="px-3 py-2.5">Calibración LBP</th>
+                                            <th className="px-3 py-2.5">Anti-Spoofing</th>
                                             <th className="px-3 py-2.5">Ubicación</th>
                                             <th className="px-3 py-2.5">Estado Edge</th>
                                             <th className="px-3 py-2.5 rounded-tr-md text-right">Acciones</th>
@@ -454,6 +497,22 @@ export default function IoTDevicesView() {
                                                     <span className="px-2 py-0.5 rounded-md font-mono text-[11px] font-bold bg-primary/10 text-primary border border-primary/20">
                                                         θ = {device.lbp_threshold?.toFixed(3) || "3.670"}
                                                     </span>
+                                                </td>
+                                                <td className="px-3 py-2.5">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleToggleAntispoofing(device)}
+                                                        className={`h-6 text-[11px] font-semibold px-2 rounded-full border transition-all flex items-center gap-1.5 ${
+                                                            device.antispoofing_enabled !== false
+                                                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                                                                : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                                                        }`}
+                                                        title={device.antispoofing_enabled !== false ? "Anti-spoofing activo. Clic para desactivar y cambiar a match directo <200ms" : "Bypass activo. Clic para reactivar filtro de textura LBP"}
+                                                    >
+                                                        <span className={`h-2 w-2 rounded-full ${device.antispoofing_enabled !== false ? "bg-emerald-500" : "bg-amber-500"}`} />
+                                                        {device.antispoofing_enabled !== false ? "LBP Activo" : "Bypass (<200ms)"}
+                                                    </Button>
                                                 </td>
                                                 <td className="px-3 py-2.5 text-muted-foreground">
                                                     {device.location ? (
@@ -586,6 +645,24 @@ export default function IoTDevicesView() {
                                 >
                                     <span className={`h-2 w-2 rounded-full mr-1.5 ${editActive ? "bg-white animate-pulse" : "bg-muted-foreground"}`} />
                                     {editActive ? "Cámara Activa" : "Cámara Inactiva"}
+                                </Button>
+                            </div>
+
+                            {/* Toggle de Anti-Spoofing LBP */}
+                            <div className="flex items-center justify-between p-2.5 rounded-lg border bg-muted/40">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-semibold">Validación Anti-Spoofing (LBP)</Label>
+                                    <p className="text-[10px] text-muted-foreground">Si se desactiva, omite la textura LBP para responder en &lt; 200 ms.</p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant={editAntispoofing ? "default" : "outline"}
+                                    size="sm"
+                                    className={editAntispoofing ? "bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 px-3" : "text-xs h-7 px-3 border-amber-500/40 text-amber-600"}
+                                    onClick={() => setEditAntispoofing(!editAntispoofing)}
+                                >
+                                    <span className={`h-2 w-2 rounded-full mr-1.5 ${editAntispoofing ? "bg-white" : "bg-amber-500"}`} />
+                                    {editAntispoofing ? "LBP Activo" : "Bypass (<200ms)"}
                                 </Button>
                             </div>
                             {/* Asistente de Auto-Calibración Sensorial en Vivo */}

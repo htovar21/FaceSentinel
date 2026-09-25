@@ -74,6 +74,14 @@ class ClientCreate(BaseModel):
     developer_user_id: str
     developer_username: str
     developer_password: str
+    liveness_policy: Optional[str] = Field("active", description="Política de liveness: 'none', 'passive', 'active'")
+
+
+class ClientUpdate(BaseModel):
+    """Modelo para actualizar una aplicación cliente de terceros."""
+    app_name: Optional[str] = None
+    redirect_uris: Optional[List[str]] = None
+    liveness_policy: Optional[str] = Field(None, description="Política de liveness: 'none', 'passive', 'active'")
 
 
 class ClientResponse(BaseModel):
@@ -82,6 +90,7 @@ class ClientResponse(BaseModel):
     client_secret: Optional[str] = None
     app_name: str
     redirect_uris: List[str]
+    liveness_policy: Optional[str] = "active"
 
 
 class PasswordAuthRequest(BaseModel):
@@ -124,6 +133,7 @@ class IoTDeviceCreate(BaseModel):
     location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
     stream_url: Optional[str] = Field(None, description="URL del stream de video RTSP o HTTP de la cámara")
     lbp_threshold: float = Field(3.670, description="Umbral de entropía LBP configurado para el sensor óptico del dispositivo")
+    antispoofing_enabled: bool = Field(True, description="Si es False omite análisis LBP y valida directamente ArcFace (<200ms)")
 
 
 class IoTDeviceUpdate(BaseModel):
@@ -132,6 +142,7 @@ class IoTDeviceUpdate(BaseModel):
     location: Optional[str] = Field(None, description="Ubicación física del dispositivo")
     stream_url: Optional[str] = Field(None, description="URL del stream de video RTSP o HTTP")
     lbp_threshold: Optional[float] = Field(None, description="Nuevo umbral de calibración óptica LBP")
+    antispoofing_enabled: Optional[bool] = Field(None, description="Activa o desactiva la validación anti-spoofing")
     is_active: Optional[bool] = Field(None, description="Estado de activación del punto de acceso")
 
 

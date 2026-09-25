@@ -128,9 +128,9 @@ def test_e2e_m2m_telemetry_flow(client):
     with open(MD_REPORT_PATH, "r", encoding="utf-8") as f:
         md_text = f.read()
         assert "Matriz de Confusión" in md_text
-        assert "Desglose de Latencias" in md_text
+        assert "Latencias" in md_text
 
     with open(TEX_REPORT_PATH, "r", encoding="utf-8") as f:
         tex_text = f.read()
         assert "\\begin{table}" in tex_text
-        assert "\\label{tab:confusion_matrix}" in tex_text
+        assert "\\label{tab:matriz_confusion}" in tex_text

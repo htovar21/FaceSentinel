@@ -196,12 +196,23 @@ class TestLiveness:
         assert "frequency_score" in result
 
     def test_comprehensive_check_no_face(self):
-        """Verifica que una imagen sin rostro falla el liveness."""
+        """Verifica que una imagen sin rostro falla el liveness y marca is_corrupted."""
         from app.services.liveness import comprehensive_liveness_check
 
         black_img = np.zeros((200, 200, 3), dtype=np.uint8)
         result = comprehensive_liveness_check(black_img)
         assert result["is_live"] is False
+        assert result["is_corrupted"] is True
+
+    def test_analyze_texture_corrupted_frame(self):
+        """Verifica que un fotograma plano o dañado por red sea detectado como corrupto."""
+        from app.services.liveness import analyze_texture
+
+        black_img = np.zeros((128, 128, 3), dtype=np.uint8)
+        result = analyze_texture(black_img)
+        assert result["is_corrupted"] is True
+        assert result["is_real"] is False
+        assert result["entropy"] == 0.0
 
 
 # =========================================================================

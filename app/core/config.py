@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # IA
     AI_MODEL_NAME: str = "ArcFace"
-    FACE_MATCH_THRESHOLD: float = float(os.getenv("FACE_MATCH_THRESHOLD", "0.75"))
+    FACE_MATCH_THRESHOLD: float = float(os.getenv("FACE_MATCH_THRESHOLD", "0.68"))
     
     # Web3
     BLOCKCHAIN_RPC_URL: str = "http://127.0.0.1:7545"

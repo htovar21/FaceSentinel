@@ -183,6 +183,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
                 fallback_thresh = custom_lbp_threshold if custom_lbp_threshold is not None else 3.20
                 return {
                     "is_real": False,
+                    "is_corrupted": True,
                     "texture_score": 0.0,
                     "entropy": 0.0,
                     "lbp_threshold": round(fallback_thresh, 4),
@@ -192,7 +193,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
                     "quality_score": 0.0,
                     "face_roi_size": [0, 0],
                     "time_ms": round(elapsed_ms, 2),
-                    "reason": "No se detectó rostro"
+                    "reason": "Fotograma corrupto o sin rostro discernible"
                 }
 
         # 1. Medición de calidad óptica en resolución nativa antes del redimensionamiento:
@@ -200,7 +201,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
         # - Área/escala real del ROI facial
         roi_h, roi_w = raw_face_roi.shape[:2]
         face_size = min(roi_w, roi_h)
-        laplacian_var = float(cv2.Laplacian(raw_face_roi, cv2.CV_64F).var())
+        laplacian_var = float(cv2.Laplacian(raw_face_roi, cv2.CV_64F).var()) if (raw_face_roi is not None and raw_face_roi.size > 0) else 0.0
 
         # Normalización del índice de calidad óptica Q in [0.0, 1.0]
         # Calibración empírica:
@@ -235,15 +236,27 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
         else:
             effective_threshold = 3.20
 
-        is_real = entropy >= effective_threshold
+        # Detección de frame corrupto por red / macroblock loss de HEVC:
+        # Si la entropía o la nitidez caen abruptamente a 0.0 (o valores degenerados <= 0.05 / <= 1.0),
+        # se marca como corrupto para reintentar la captura sin registrarlo como spoofing.
+        is_corrupted = bool(
+            entropy <= 0.05 or
+            laplacian_var <= 1.0 or
+            np.isnan(entropy) or
+            np.isnan(laplacian_var) or
+            np.isinf(entropy)
+        )
+
+        is_real = False if is_corrupted else (entropy >= effective_threshold)
 
         # Score normalizado según el umbral efectivo
-        texture_score = min(1.0, max(0.0, (entropy - (effective_threshold - 0.4)) / 0.8))
+        texture_score = 0.0 if is_corrupted else min(1.0, max(0.0, (entropy - (effective_threshold - 0.4)) / 0.8))
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "is_real": is_real,
+            "is_corrupted": is_corrupted,
             "texture_score": round(texture_score, 4),
             "entropy": round(entropy, 4),
             "lbp_threshold": round(effective_threshold, 4),
@@ -254,6 +267,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
             "quality_score": round(quality_score, 4),
             "face_roi_size": [roi_w, roi_h],
             "time_ms": round(elapsed_ms, 2),
+            "reason": "Fotograma corrupto o dañado por red" if is_corrupted else ("Textura facial válida" if is_real else "Posible ataque de presentación")
         }
 
     except Exception as e:
@@ -261,8 +275,9 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         fallback_thresh = custom_lbp_threshold if custom_lbp_threshold is not None else 3.20
         return {
-            "is_real": True,
-            "texture_score": 0.5,
+            "is_real": False,
+            "is_corrupted": True,
+            "texture_score": 0.0,
             "entropy": 0.0,
             "lbp_threshold": round(fallback_thresh, 4),
             "variance": 0.0,
@@ -271,7 +286,7 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adap
             "quality_score": 0.0,
             "face_roi_size": [0, 0],
             "time_ms": round(elapsed_ms, 2),
-            "reason": "Error en análisis"
+            "reason": "Fotograma corrupto o error en decodificación"
         }
 
 
@@ -441,13 +456,14 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
         elapsed_total = (time.perf_counter() - t0_check) * 1000.0
         return {
             "is_live": False,
+            "is_corrupted": True,
             "liveness_score": 0.0,
             "t_lbp_ms": 0.0,
             "t_fft_ms": 0.0,
             "t_liveness_total_ms": round(elapsed_total, 2),
             "entropy": 0.0,
             "lbp_threshold": round(custom_lbp_threshold, 4),
-            "reason": "No se detectó rostro en la imagen",
+            "reason": "No se detectó rostro en la imagen o fotograma dañado",
             "details": {}
         }
 
@@ -465,6 +481,7 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
     freq_score = freq_result.get("frequency_score", 0.5)
     presence_score = 1.0 if has_face else 0.0
     texture_is_real = texture_result.get("is_real", False)
+    is_corrupted = bool(texture_result.get("is_corrupted", False) or texture_result.get("entropy", 0.0) <= 0.05)
 
     liveness_score = (
         texture_score * 0.50 +
@@ -473,11 +490,16 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
     )
 
     # El filtro de textura (LBP) es determinante: si no supera el umbral de piel real, se rechaza
-    is_live = bool(texture_is_real and (liveness_score >= 0.50))
+    is_live = bool((not is_corrupted) and texture_is_real and (liveness_score >= 0.50))
     elapsed_total = (time.perf_counter() - t0_check) * 1000.0
+
+    reason = "Fotograma corrupto o dañado por red" if is_corrupted else (
+        "Prueba de vida aprobada" if is_live else "Posible ataque de presentación detectado"
+    )
 
     result = {
         "is_live": is_live,
+        "is_corrupted": is_corrupted,
         "liveness_score": round(liveness_score, 4),
         "entropy": texture_result.get("entropy", 0.0),
         "lbp_threshold": texture_result.get("lbp_threshold", custom_lbp_threshold),
@@ -485,7 +507,7 @@ def comprehensive_liveness_check(frame_bgr, custom_lbp_threshold: float = 3.2) -
         "t_lbp_ms": texture_result.get("time_ms", 0.0),
         "t_fft_ms": freq_result.get("time_ms", 0.0),
         "t_liveness_total_ms": round(elapsed_total, 2),
-        "reason": "Prueba de vida aprobada" if is_live else "Posible ataque de presentación detectado",
+        "reason": reason,
         "details": {
             "texture": texture_result,
             "frequency": freq_result,

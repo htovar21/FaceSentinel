@@ -589,6 +589,7 @@ def save_iot_device(
     token_plain: Optional[str] = None,
     lbp_threshold: float = 3.2,
     stream_url: Optional[str] = None,
+    antispoofing_enabled: bool = True,
     is_active: bool = True
 ) -> bool:
     """Guarda o actualiza un dispositivo IoT en la base de datos."""
@@ -603,6 +604,7 @@ def save_iot_device(
                 device.location = location
                 device.client_secret_hash = client_secret_hash
                 device.lbp_threshold = lbp_threshold
+                device.antispoofing_enabled = antispoofing_enabled
                 if stream_url is not None:
                     device.stream_url = stream_url
                 if lookup_hash is not None:
@@ -619,11 +621,12 @@ def save_iot_device(
                     token_lookup_hash=lookup_hash,
                     lbp_threshold=lbp_threshold,
                     stream_url=stream_url,
+                    antispoofing_enabled=antispoofing_enabled,
                     is_active=is_active
                 )
                 session.add(device)
             session.commit()
-            logger.info(f"⚙️ Dispositivo IoT '{device_name}' (ID: {device_id}) guardado con éxito.")
+            logger.info(f"⚙️ Dispositivo IoT '{device_name}' (ID: {device_id}, Antispoofing: {antispoofing_enabled}) guardado con éxito.")
             return True
         except Exception as e:
             session.rollback()
@@ -637,6 +640,7 @@ def update_iot_device(
     location: Optional[str] = None,
     stream_url: Optional[str] = None,
     lbp_threshold: Optional[float] = None,
+    antispoofing_enabled: Optional[bool] = None,
     is_active: Optional[bool] = None
 ) -> bool:
     """Actualiza campos específicos de un dispositivo IoT existente."""
@@ -653,11 +657,13 @@ def update_iot_device(
                 device.stream_url = stream_url
             if lbp_threshold is not None:
                 device.lbp_threshold = lbp_threshold
+            if antispoofing_enabled is not None:
+                device.antispoofing_enabled = antispoofing_enabled
             if is_active is not None:
                 device.is_active = is_active
             device.updated_at = datetime.utcnow()
             session.commit()
-            logger.info(f"🔄 Dispositivo IoT '{device_id}' actualizado.")
+            logger.info(f"🔄 Dispositivo IoT '{device_id}' actualizado (Antispoofing: {getattr(device, 'antispoofing_enabled', True)}).")
             return True
         except Exception as e:
             session.rollback()
@@ -670,6 +676,9 @@ def get_iot_device(device_id: str) -> Optional[dict]:
     with SessionLocal() as session:
         device = session.get(IoTDevice, device_id)
         if device:
+            anti_enabled = getattr(device, "antispoofing_enabled", True)
+            if anti_enabled is None:
+                anti_enabled = True
             return {
                 "device_id": device.device_id,
                 "device_name": device.device_name,
@@ -678,6 +687,7 @@ def get_iot_device(device_id: str) -> Optional[dict]:
                 "client_secret_hash": device.client_secret_hash,
                 "lbp_threshold": getattr(device, "lbp_threshold", 3.2),
                 "stream_url": getattr(device, "stream_url", None),
+                "antispoofing_enabled": bool(anti_enabled),
                 "is_active": device.is_active,
                 "created_at": device.created_at,
                 "updated_at": device.updated_at
@@ -764,6 +774,8 @@ def get_device_by_token(token: str) -> Optional[dict]:
         )
         device = session.scalars(stmt).first()
         if device and verify_client_secret(token, device.client_secret_hash):
+            anti = getattr(device, "antispoofing_enabled", True)
+            if anti is None: anti = True
             return {
                 "device_id": device.device_id,
                 "device_name": device.device_name,
@@ -771,6 +783,7 @@ def get_device_by_token(token: str) -> Optional[dict]:
                 "location": device.location,
                 "client_secret_hash": device.client_secret_hash,
                 "lbp_threshold": getattr(device, "lbp_threshold", 3.2),
+                "antispoofing_enabled": bool(anti),
                 "is_active": device.is_active,
                 "created_at": device.created_at,
                 "updated_at": device.updated_at
@@ -787,6 +800,8 @@ def get_device_by_token(token: str) -> Optional[dict]:
                 # Auto-migrar en el primer acceso exitoso
                 leg_device.token_lookup_hash = lookup
                 session.commit()
+                anti = getattr(leg_device, "antispoofing_enabled", True)
+                if anti is None: anti = True
                 return {
                     "device_id": leg_device.device_id,
                     "device_name": leg_device.device_name,
@@ -794,6 +809,7 @@ def get_device_by_token(token: str) -> Optional[dict]:
                     "location": leg_device.location,
                     "client_secret_hash": leg_device.client_secret_hash,
                     "lbp_threshold": getattr(leg_device, "lbp_threshold", 3.2),
+                    "antispoofing_enabled": bool(anti),
                     "is_active": leg_device.is_active,
                     "created_at": leg_device.created_at,
                     "updated_at": leg_device.updated_at
@@ -829,6 +845,7 @@ def get_all_devices() -> list[dict]:
                 "location": d.location,
                 "lbp_threshold": getattr(d, "lbp_threshold", 3.2),
                 "stream_url": getattr(d, "stream_url", None),
+                "antispoofing_enabled": bool(getattr(d, "antispoofing_enabled", True) if getattr(d, "antispoofing_enabled", True) is not None else True),
                 "is_active": d.is_active,
                 "created_at": d.created_at
             }

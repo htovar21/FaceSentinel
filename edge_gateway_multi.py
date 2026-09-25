@@ -33,6 +33,9 @@ from datetime import datetime
 import numpy as np
 import cv2
 import requests
+
+# Forzar transporte TCP para streams RTSP en OpenCV (elimina pérdida de paquetes H.264/H.265 y macroblock glitches)
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 import mediapipe as mp
 
 # UTF-8 para consola de Windows
@@ -103,6 +106,8 @@ class RTSPCaptureThread(threading.Thread):
     def run(self):
         while self.running:
             if self.cap is None or not self.cap.isOpened():
+                # Forzar transporte TCP antes de inicializar VideoCapture
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
                 if isinstance(self.source, int):
                     self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
                     if not self.cap.isOpened():
@@ -393,11 +398,18 @@ class CameraWorker(threading.Thread):
             if resp.status_code == 200:
                 data = resp.json()
                 user = data.get("user", {})
+                bio = data.get("biometrics", {})
+                dist_str = f" [Dist: {bio.get('distance')}]" if bio.get("distance") is not None else ""
                 self.user_name = user.get("name", "Usuario")
                 self.user_role = user.get("role", "Autorizado")
                 self.status = "GRANTED"
                 self.status_msg = f"{self.user_name}"
-                print(f"🎯 [{self.device_id}] ACCESO CONCEDIDO -> {self.user_name} ({self.user_role}) [Modo: {CameraWorker.active_test_type}]")
+                print(f"🎯 [{self.device_id}] ACCESO CONCEDIDO -> {self.user_name} ({self.user_role}){dist_str} [Modo: {CameraWorker.active_test_type}]")
+            elif resp.status_code == 422:
+                detail = resp.json().get("detail", "Fotograma corrupto, reintentando...")
+                self.status = "MONITORING"
+                self.status_msg = "REINTENTO"
+                print(f"⚠️ [{self.device_id}] FOTOGRAMA CORRUPTO DESCARTADO -> {detail}")
             else:
                 detail = resp.json().get("detail", "Denegado")
                 self.status = "DENIED"

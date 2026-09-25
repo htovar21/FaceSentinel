@@ -20,6 +20,9 @@ import time
 import threading
 from collections import deque
 
+# Forzar transporte TCP para streams RTSP en OpenCV (evita pérdida de paquetes H.264/H.265 y macroblock glitches)
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
 # =========================================================================
 #                     CONFIGURACIONES DEL GATEWAY
 # =========================================================================
@@ -274,6 +277,10 @@ def send_auth_request(base64_img: str, telemetry: dict, callbacks: dict):
             print(f" 🎯 Resultado: ACCESO CONCEDIDO -> Bienvenido/a {name} ({role})")
             print("=" * 65 + "\n")
             callbacks["on_granted"](name, role)
+        elif response.status_code == 422:
+            detail = data.get("detail", "Fotograma dañado por red, reintentando...")
+            print(f" ⚠️ Resultado: FOTOGRAMA DESCARTADO -> {detail}")
+            print("=" * 65 + "\n")
         else:
             detail = data.get("detail", "No autorizado")
             print(f" 🚫 Resultado: ACCESO DENEGADO -> {detail}")
@@ -303,6 +310,9 @@ def main():
     print("   [N] Luz NORMAL | [H] Contraluz/HIGH_LIGHT | [L] Baja luz/LOW_LIGHT")
     print("   [Q/ESC] Salir")
     print("=========================================================================\n")
+
+    # Forzar transporte TCP en OpenCV FFMPEG backend antes de inicializar VideoCapture
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
     # Intentar abrir la fuente de video (cámara, IP cam o archivo)
     cap = None

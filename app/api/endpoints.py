@@ -14,6 +14,7 @@ from app.api.schemas import (
     AuthResponse,
     BlockchainInfoResponse,
     ClientCreate,
+    ClientUpdate,
     ClientResponse,
     PasswordAuthRequest,
     PasswordChangeRequest,
@@ -27,6 +28,7 @@ import secrets
 from app.services.storage import (
     save_oauth_client,
     get_oauth_client,
+    update_oauth_client,
     get_all_oauth_clients,
     get_user_auth_info_by_username,
     get_user_auth_info_by_id,
@@ -87,6 +89,7 @@ def register_oauth_client(client_data: ClientCreate, current_user: dict = Depend
     # Hashear la contraseña del desarrollador
     dev_password_hash = hash_client_secret(client_data.developer_password)
     
+    policy = client_data.liveness_policy or "active"
     success = save_oauth_client(
         client_id=client_id,
         client_secret_hash=secret_hash,
@@ -94,7 +97,8 @@ def register_oauth_client(client_data: ClientCreate, current_user: dict = Depend
         app_name=client_data.app_name,
         developer_user_id=client_data.developer_user_id,
         developer_username=client_data.developer_username,
-        developer_password_hash=dev_password_hash
+        developer_password_hash=dev_password_hash,
+        liveness_policy=policy
     )
     
     if not success:
@@ -107,8 +111,31 @@ def register_oauth_client(client_data: ClientCreate, current_user: dict = Depend
         client_id=client_id,
         client_secret=client_secret,
         app_name=client_data.app_name,
-        redirect_uris=client_data.redirect_uris
+        redirect_uris=client_data.redirect_uris,
+        liveness_policy=policy
     )
+
+
+@router.patch("/clients/{client_id}", tags=["IdP OAuth / SSO"])
+@router.put("/clients/{client_id}", tags=["IdP OAuth / SSO"])
+def update_client(
+    client_id: str,
+    update_data: ClientUpdate,
+    current_user: dict = Depends(require_admin)
+):
+    """Actualiza la configuración o política de liveness de una aplicación cliente."""
+    success = update_oauth_client(
+        client_id=client_id,
+        app_name=update_data.app_name,
+        redirect_uris=update_data.redirect_uris,
+        liveness_policy=update_data.liveness_policy
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Cliente '{client_id}' no encontrado o no se pudo actualizar."
+        )
+    return {"success": True, "message": f"Cliente '{client_id}' actualizado correctamente."}
 
 
 @router.get("/clients", tags=["IdP OAuth / SSO"])
@@ -420,6 +447,16 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
     """
     await websocket.accept()
     
+    # REGLA DE SEGURIDAD (Anti-Downgrade):
+    # Si no se envía client_id o el client_id no existe, aplica por defecto "active".
+    liveness_policy = "active"
+    if client_id:
+        client_info = get_oauth_client(client_id)
+        if client_info:
+            liveness_policy = client_info.get("liveness_policy", "active") or "active"
+
+    logger.info(f"🌐 WebSocket Liveness conectado. Client ID: '{client_id}' | Política activa: '{liveness_policy}'")
+    
     # Tolerancia: ear_threshold=0.16 para asegurar que el usuario cerró intencionalmente 
     # los ojos, y no un falso positivo por párpados naturalmente caídos o inicialización.
     tracker = BlinkTracker(ear_threshold=0.16, consecutive_frames=1)
@@ -473,6 +510,76 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                         "message": "Enfoca bien tu rostro en la cámara..."
                     })
                     continue
+
+                effective_client_id = client_id or "LOCAL_AUTH"
+
+                # -------------------------------------------------------------
+                # POLÍTICA 1: "none" (1-Shot Instantáneo sin anti-spoofing)
+                # -------------------------------------------------------------
+                if liveness_policy == "none":
+                    print("⚡ Política 'none' (1-Shot Instantáneo): Ejecutando ArcFace en primer frame con rostro...")
+                    auth_res = verify_face(img_bgr, custom_threshold=0.70)
+                    metrics_payload = {
+                        "blink": {"value": round(ear, 3), "threshold": "N/A (1-Shot)", "weight": "Deshabilitado", "passed": True},
+                        "texture": {"value": 0.0, "threshold": "N/A (1-Shot)", "weight": "Deshabilitado", "passed": True},
+                        "pose": {"value": "N/A", "threshold": "N/A (1-Shot)", "weight": "Deshabilitado", "passed": True},
+                        "frequency": {"value": 0.0, "threshold": "N/A", "weight": "Deshabilitado"}
+                    }
+                    if auth_res.get("success"):
+                        user_id = auth_res["user_id"]
+                        user_name = auth_res["name"]
+                        role = auth_res["role"]
+                        distance = auth_res["distance"]
+                        token = generate_idp_token(
+                            user_id=user_id,
+                            client_id=effective_client_id,
+                            role=role,
+                            action=action,
+                            name=user_name
+                        )
+                        loop = asyncio.get_event_loop()
+                        log_res = await loop.run_in_executor(
+                            None,
+                            lambda: log_authentication(
+                                user_id=user_id,
+                                client_id=effective_client_id,
+                                embedding=None,
+                                access_granted=True,
+                                match_score=distance
+                            )
+                        )
+                        tx_hash = log_res.get("tx_hash")
+                        await websocket.send_json({
+                            "status": "passed",
+                            "message": f"¡Identidad verificada (1-Shot)! Bienvenido, {user_name}",
+                            "user_id": user_id,
+                            "user_name": user_name,
+                            "role": role,
+                            "token": token,
+                            "match_score": distance,
+                            "tx_hash": tx_hash,
+                            "metrics": metrics_payload
+                        })
+                    else:
+                        distance = auth_res.get("distance", 0.0)
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            lambda: log_authentication(
+                                user_id="UNKNOWN",
+                                client_id=effective_client_id,
+                                embedding=None,
+                                access_granted=False,
+                                match_score=distance
+                            )
+                        )
+                        await websocket.send_json({
+                            "status": "failed",
+                            "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
+                            "match_score": distance,
+                            "metrics": metrics_payload
+                        })
+                    break
                 
                 if phase == "blink":
                     # Actualizar el rastreador de parpadeo con el EAR actual
@@ -487,6 +594,15 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                         print(f"🔬 Fase 1 (Parpadeo) -> LBP: {texture_res.get('entropy')} | Umbral: {texture_res.get('lbp_threshold')}")
                         
                         if not texture_res.get("is_real"):
+                            if texture_res.get("is_corrupted") or texture_res.get("entropy", 0.0) <= 0.05:
+                                print(f"⚠️ Fotograma corrupto recibido en websocket (entropía ~0.0). Descartando sin registrar spoofing.")
+                                tracker.reset()
+                                await websocket.send_json({
+                                    "status": "tracking",
+                                    "message": "Fotograma borroso o con interferencia. Mantén el rostro visible y parpadea nuevamente."
+                                })
+                                continue
+
                             print(f"🚨 Spoofing detectado en blink (Foto/Impresión). Texture: {texture_res.get('texture_score')}")
                             tracker.reset()
                             await websocket.send_json({
@@ -500,6 +616,96 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                             })
                             continue
                         
+                        # -------------------------------------------------------------
+                        # POLÍTICA 2: "passive" (Parpadeo + LBP sin desafíos de pose)
+                        # -------------------------------------------------------------
+                        if liveness_policy == "passive":
+                            print("⚡ Política 'passive' (Parpadeo + LBP): Ejecutando ArcFace tras validación de vida pasiva...")
+                            metrics_payload = {
+                                "blink": {
+                                    "value": round(ear, 3),
+                                    "threshold": "< 0.16",
+                                    "weight": "Filtro Base (Obligatorio)",
+                                    "passed": True
+                                },
+                                "texture": {
+                                    "value": texture_res.get("entropy"),
+                                    "threshold": f">= {sso_lbp_threshold:.2f}",
+                                    "weight": "Determinante (Alto)",
+                                    "passed": True
+                                },
+                                "pose": {
+                                    "value": "N/A",
+                                    "threshold": "N/A (Modo Pasivo)",
+                                    "weight": "Deshabilitado",
+                                    "passed": True
+                                },
+                                "frequency": {
+                                    "value": freq_res.get("freq_ratio"),
+                                    "threshold": "N/A",
+                                    "weight": "Bypass (OLED)"
+                                }
+                            }
+                            auth_res = verify_face(img_bgr, custom_threshold=0.70)
+                            if auth_res.get("success"):
+                                user_id = auth_res["user_id"]
+                                user_name = auth_res["name"]
+                                role = auth_res["role"]
+                                distance = auth_res["distance"]
+                                token = generate_idp_token(
+                                    user_id=user_id,
+                                    client_id=effective_client_id,
+                                    role=role,
+                                    action=action,
+                                    name=user_name
+                                )
+                                loop = asyncio.get_event_loop()
+                                log_res = await loop.run_in_executor(
+                                    None,
+                                    lambda: log_authentication(
+                                        user_id=user_id,
+                                        client_id=effective_client_id,
+                                        embedding=None,
+                                        access_granted=True,
+                                        match_score=distance
+                                    )
+                                )
+                                tx_hash = log_res.get("tx_hash")
+                                await websocket.send_json({
+                                    "status": "passed",
+                                    "message": f"¡Identidad verificada (Pasivo)! Bienvenido, {user_name}",
+                                    "user_id": user_id,
+                                    "user_name": user_name,
+                                    "role": role,
+                                    "token": token,
+                                    "match_score": distance,
+                                    "tx_hash": tx_hash,
+                                    "metrics": metrics_payload
+                                })
+                            else:
+                                distance = auth_res.get("distance", 0.0)
+                                loop = asyncio.get_event_loop()
+                                await loop.run_in_executor(
+                                    None,
+                                    lambda: log_authentication(
+                                        user_id="UNKNOWN",
+                                        client_id=effective_client_id,
+                                        embedding=None,
+                                        access_granted=False,
+                                        match_score=distance
+                                    )
+                                )
+                                await websocket.send_json({
+                                    "status": "failed",
+                                    "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
+                                    "match_score": distance,
+                                    "metrics": metrics_payload
+                                })
+                            break
+
+                        # -------------------------------------------------------------
+                        # POLÍTICA 3: "active" (Parpadeo + LBP + Desafío Activo de Pose)
+                        # -------------------------------------------------------------
                         # ¡Fase 1 superada! Guardamos el fotograma FRONTAL limpio para ArcFace
                         frontal_frame = img_bgr.copy()
                         saved_texture_res = texture_res
@@ -881,6 +1087,9 @@ def physical_access_authenticate(
 
     device_lbp_threshold = device.get("lbp_threshold", 3.2) if isinstance(device, dict) else getattr(device, "lbp_threshold", 3.2)
     device_id = device.get("device_id", "API-SERVER-01") if isinstance(device, dict) else getattr(device, "device_id", "API-SERVER-01")
+    antispoofing_enabled = device.get("antispoofing_enabled", True) if isinstance(device, dict) else getattr(device, "antispoofing_enabled", True)
+    if antispoofing_enabled is None:
+        antispoofing_enabled = True
 
     # 2. Decodificar imagen base64
     try:
@@ -891,58 +1100,84 @@ def physical_access_authenticate(
             detail=f"Error decodificando imagen: {str(e)}"
         )
 
-    # 3. Validación de Liveness (Anti-Spoofing) con umbral dinámico configurado para este dispositivo
-    try:
-        liveness_res = comprehensive_liveness_check(img_bgr, custom_lbp_threshold=device_lbp_threshold)
-        if not liveness_res.get("is_live"):
-            t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
-            metrics_payload = {
-                "test_type": payload.test_type or "SPOOF_ATTACK",
-                "environmental_condition": payload.environmental_condition or "NORMAL",
-                "user_id": "UNKNOWN",
-                "granted": False,
-                "rejection_reason": "SPOOFING_DETECTED",
-                "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
-                "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
-                "t_network_rtt_ms": 0.0,
-                "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
-                "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
-                "t_arcface_ms": 0.0,
-                "t_chroma_ms": 0.0,
-                "t_sqlite_ms": round(t_sqlite_accum, 2),
-                "t_backend_total_ms": round(t_backend_total_ms, 2),
-                "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
-                "ear_open": payload.ear_open_value or 0.0,
-                "ear_blink": payload.ear_blink_value or 0.0,
-                "lbp_entropy": liveness_res.get("entropy", 0.0),
-                "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
-                "lbp_variance": liveness_res.get("lbp_variance", 0.0),
-                "liveness_score": liveness_res.get("liveness_score", 0.0),
-                "cosine_distance": 0.0,
-                "match_threshold": settings.FACE_MATCH_THRESHOLD,
-            }
+    # 3. Validación de Liveness (Anti-Spoofing) según política del dispositivo
+    if not antispoofing_enabled:
+        # Modo Bypass Ultra-Rápido (< 200 ms): omite validación LBP y ejecuta directamente ArcFace
+        logger.info(f"⚡ Bypass anti-spoofing activado para dispositivo '{device_id}' (antispoofing_enabled=False). Match directo.")
+        liveness_res = {
+            "is_live": True,
+            "t_lbp_ms": 0.0,
+            "t_fft_ms": 0.0,
+            "entropy": 0.0,
+            "lbp_threshold": device_lbp_threshold,
+            "lbp_variance": 0.0,
+            "liveness_score": 1.0,
+        }
+    else:
+        try:
+            liveness_res = comprehensive_liveness_check(img_bgr, custom_lbp_threshold=device_lbp_threshold)
+            if not liveness_res.get("is_live"):
+                # Si el fotograma viene corrupto por red o micro-glitches HEVC (entropía o nitidez ~0.0),
+                # descartar el frame y solicitar reintento inmediato en lugar de registrarlo como ataque de spoofing.
+                if liveness_res.get("is_corrupted") or liveness_res.get("entropy", 0.0) <= 0.05:
+                    logger.warning(
+                        f"⚠️ [{device_id}] Fotograma corrupto o dañado por red descartado "
+                        f"(Entropía: {liveness_res.get('entropy')}, Razón: {liveness_res.get('reason')}). "
+                        f"Solicitando reintento de captura sin penalizar como spoofing."
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Fotograma corrupto o dañado por red, reintentando..."
+                    )
 
-            _dispatch_background_log(
-                user_id="UNKNOWN",
-                client_id="PHYSICAL_ACCESS",
-                embedding=None,
-                access_granted=False,
-                device_id=device_id,
-                match_score=0.0,
-                metrics_payload=metrics_payload
-            )
+                t_backend_total_ms = (time.perf_counter() - t0_backend) * 1000.0
+                metrics_payload = {
+                    "test_type": payload.test_type or "SPOOF_ATTACK",
+                    "environmental_condition": payload.environmental_condition or "NORMAL",
+                    "user_id": "UNKNOWN",
+                    "granted": False,
+                    "rejection_reason": "SPOOFING_DETECTED",
+                    "t_ear_edge_ms": payload.edge_ear_time_ms or 0.0,
+                    "t_edge_total_ms": payload.edge_total_time_ms or 0.0,
+                    "t_network_rtt_ms": 0.0,
+                    "t_lbp_ms": liveness_res.get("t_lbp_ms", 0.0),
+                    "t_fft_ms": liveness_res.get("t_fft_ms", 0.0),
+                    "t_arcface_ms": 0.0,
+                    "t_chroma_ms": 0.0,
+                    "t_sqlite_ms": round(t_sqlite_accum, 2),
+                    "t_backend_total_ms": round(t_backend_total_ms, 2),
+                    "t_total_end2end_ms": round((payload.edge_total_time_ms or 0.0) + t_backend_total_ms, 2),
+                    "ear_open": payload.ear_open_value or 0.0,
+                    "ear_blink": payload.ear_blink_value or 0.0,
+                    "lbp_entropy": liveness_res.get("entropy", 0.0),
+                    "lbp_threshold": liveness_res.get("lbp_threshold", device_lbp_threshold),
+                    "lbp_variance": liveness_res.get("lbp_variance", 0.0),
+                    "liveness_score": liveness_res.get("liveness_score", 0.0),
+                    "cosine_distance": 0.0,
+                    "match_threshold": settings.FACE_MATCH_THRESHOLD,
+                }
+
+                _dispatch_background_log(
+                    user_id="UNKNOWN",
+                    client_id="PHYSICAL_ACCESS",
+                    embedding=None,
+                    access_granted=False,
+                    device_id=device_id,
+                    match_score=0.0,
+                    metrics_payload=metrics_payload
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Spoofing detectado"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error en validación liveness: {e}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Spoofing detectado"
+                detail="Error durante la validación de Liveness."
             )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error en validación liveness: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Error durante la validación de Liveness."
-        )
 
     # 4. Extraer embedding y buscar en ChromaDB
     try:
@@ -1196,6 +1431,7 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         token_plain=client_secret,
         lbp_threshold=device_data.lbp_threshold,
         stream_url=device_data.stream_url,
+        antispoofing_enabled=device_data.antispoofing_enabled,
         is_active=True
     )
     
@@ -1212,6 +1448,7 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
         "location": device_data.location,
         "stream_url": device_data.stream_url,
         "lbp_threshold": device_data.lbp_threshold,
+        "antispoofing_enabled": device_data.antispoofing_enabled,
         "client_secret": client_secret  # Se retorna una sola vez en texto plano
     }
 
@@ -1252,6 +1489,7 @@ def sync_devices_for_gateway():
             "source": d["stream_url"] if d.get("stream_url") else "0",
             "location": d.get("location") or "Punto de Acceso",
             "enabled": bool(d.get("is_active", True) and d.get("stream_url")),
+            "antispoofing_enabled": d.get("antispoofing_enabled", True),
             "lbp_threshold": d.get("lbp_threshold", 3.670)
         })
 
@@ -1289,6 +1527,7 @@ def update_device(
         location=update_data.location,
         stream_url=update_data.stream_url,
         lbp_threshold=update_data.lbp_threshold,
+        antispoofing_enabled=update_data.antispoofing_enabled,
         is_active=update_data.is_active
     )
     if not success:
@@ -1317,6 +1556,8 @@ def update_device(
                             c["name"] = update_data.device_name
                         if update_data.location is not None:
                             c["location"] = update_data.location
+                        if update_data.antispoofing_enabled is not None:
+                            c["antispoofing_enabled"] = update_data.antispoofing_enabled
                 if not matched and update_data.stream_url:
                     configs.append({
                         "device_id": device_id,
@@ -1325,11 +1566,13 @@ def update_device(
                         "source": update_data.stream_url or "0",
                         "location": update_data.location or "Punto de Acceso",
                         "enabled": bool(update_data.is_active) if update_data.is_active is not None else True,
+                        "antispoofing_enabled": update_data.antispoofing_enabled if update_data.antispoofing_enabled is not None else True,
                         "lbp_threshold": update_data.lbp_threshold or 3.670
                     })
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(configs, f, indent=4)
             except Exception:
+                pass
                 pass
 
     return {"success": True, "message": f"Dispositivo '{device_id}' actualizado correctamente."}

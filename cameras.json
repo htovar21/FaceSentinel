@@ -5,7 +5,8 @@
         "token": "hw_iphone6_token",
         "source": "http://192.168.80.173:4747/video",
         "location": "Punto de Acceso",
-        "enabled": true,
+        "enabled": false,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.595
     },
     {
@@ -15,6 +16,7 @@
         "source": "http://192.168.80.89:4747/video",
         "location": "Punto de Acceso",
         "enabled": true,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.563
     },
     {
@@ -23,8 +25,9 @@
         "token": "hw_zaEy9rg43tK6QZa0e9O_oDE_spala6yRm71hA74ayV8",
         "source": "rtsp://admin1:cimos.1979@192.168.70.10:554/Streaming/Channels/201",
         "location": "Patio B",
-        "enabled": true,
-        "lbp_threshold": 3.669
+        "enabled": false,
+        "antispoofing_enabled": true,
+        "lbp_threshold": 3.58
     },
     {
         "device_id": "DOOR_01",
@@ -33,6 +36,7 @@
         "source": "0",
         "location": "Entrada Principal",
         "enabled": false,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.2
     },
     {
@@ -42,6 +46,7 @@
         "source": "0",
         "location": "Entrada Biblioteca",
         "enabled": false,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.2
     },
     {
@@ -51,6 +56,7 @@
         "source": "0",
         "location": "Edificio administrativo",
         "enabled": false,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.2
     },
     {
@@ -60,6 +66,7 @@
         "source": "0",
         "location": "Edificio administrativo",
         "enabled": false,
+        "antispoofing_enabled": true,
         "lbp_threshold": 3.2
     }
 ]

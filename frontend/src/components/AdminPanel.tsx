@@ -13,6 +13,7 @@ interface Client {
     client_id: string
     app_name: string
     redirect_uris: string[]
+    liveness_policy?: "none" | "passive" | "active"
     created_at: string
 }
 
@@ -56,6 +57,7 @@ export default function AdminPanel() {
     const [devCedula, setDevCedula] = useState("")
     const [devUsername, setDevUsername] = useState("")
     const [devPassword, setDevPassword] = useState("")
+    const [livenessPolicy, setLivenessPolicy] = useState<"none" | "passive" | "active">("active")
     const [registering, setRegistering] = useState(false)
     const [newClientResult, setNewClientResult] = useState<{ client_id: string; client_secret: string } | null>(null)
     const [copiedId, setCopiedId] = useState(false)
@@ -103,7 +105,8 @@ export default function AdminPanel() {
                 redirect_uris: redirectUris,
                 developer_user_id: devCedula,
                 developer_username: devUsername,
-                developer_password: devPassword
+                developer_password: devPassword,
+                liveness_policy: livenessPolicy
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
@@ -117,11 +120,27 @@ export default function AdminPanel() {
             setDevCedula("")
             setDevUsername("")
             setDevPassword("")
+            setLivenessPolicy("active")
             fetchClients()
         } catch (err: any) {
             setError(err.response?.data?.detail || "Error al registrar la aplicación.")
         } finally {
             setRegistering(false)
+        }
+    }
+
+    const handleUpdateClientPolicy = async (clientId: string, newPolicy: "none" | "passive" | "active") => {
+        setClients(prev => prev.map(c => c.client_id === clientId ? { ...c, liveness_policy: newPolicy } : c))
+        try {
+            await axios.patch(`${baseUrl}/api/v1/clients/${clientId}`, {
+                liveness_policy: newPolicy
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            fetchClients()
+        } catch (err: any) {
+            alert(err.response?.data?.detail || "Error al actualizar política de liveness del cliente.")
+            fetchClients()
         }
     }
 
@@ -424,6 +443,22 @@ export default function AdminPanel() {
                                             required
                                         />
                                     </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="livenessPolicy">Política de Liveness (Anti-Spoofing)</Label>
+                                        <select
+                                            id="livenessPolicy"
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs ring-offset-background"
+                                            value={livenessPolicy}
+                                            onChange={e => setLivenessPolicy(e.target.value as "none" | "passive" | "active")}
+                                        >
+                                            <option value="active">🛡️ Active (Blindado: Parpadeo + LBP + Retos de Pose)</option>
+                                            <option value="passive">⚡ Passive (Parpadeo + Filtro LBP sin retos)</option>
+                                            <option value="none">🚀 None (1-Shot Instantáneo sin anti-spoofing)</option>
+                                        </select>
+                                        <p className="text-[10px] text-muted-foreground">
+                                            Nivel de seguridad biométrica exigido a los usuarios de este cliente SSO.
+                                        </p>
+                                    </div>
                                     <Button type="submit" className="w-full" disabled={registering}>
                                         {registering ? "Registrando..." : "Registrar Aplicación"}
                                     </Button>
@@ -480,6 +515,7 @@ export default function AdminPanel() {
                                                 <tr>
                                                     <th className="px-3 py-2.5 rounded-tl-md">Aplicación</th>
                                                     <th className="px-3 py-2.5">Client ID</th>
+                                                    <th className="px-3 py-2.5">Política Liveness</th>
                                                     <th className="px-3 py-2.5">Redirect URIs</th>
                                                     <th className="px-3 py-2.5 rounded-tr-md">Fecha Registro</th>
                                                 </tr>
@@ -489,6 +525,23 @@ export default function AdminPanel() {
                                                     <tr key={i} className="border-b last:border-0 hover:bg-muted/10 transition-colors">
                                                         <td className="px-3 py-2.5 font-bold text-foreground">{client.app_name}</td>
                                                         <td className="px-3 py-2.5 font-mono text-muted-foreground">{client.client_id}</td>
+                                                        <td className="px-3 py-2.5">
+                                                            <select
+                                                                value={client.liveness_policy || "active"}
+                                                                onChange={(e) => handleUpdateClientPolicy(client.client_id, e.target.value as "none" | "passive" | "active")}
+                                                                className={`text-[11px] font-semibold rounded px-2 py-1 border transition-colors cursor-pointer ${
+                                                                    (client.liveness_policy || "active") === "active"
+                                                                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                                                        : (client.liveness_policy === "passive")
+                                                                        ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
+                                                                        : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                                                }`}
+                                                            >
+                                                                <option value="active">🛡️ Active (Blindado)</option>
+                                                                <option value="passive">⚡ Passive (Parpadeo)</option>
+                                                                <option value="none">🚀 None (1-Shot)</option>
+                                                            </select>
+                                                        </td>
                                                         <td className="px-3 py-2.5 truncate max-w-[200px]" title={client.redirect_uris.join(", ")}>
                                                             {client.redirect_uris.join(", ")}
                                                         </td>
