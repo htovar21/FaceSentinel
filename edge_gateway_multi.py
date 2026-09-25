@@ -23,6 +23,8 @@ import os
 import sys
 import time
 import json
+import csv
+import shutil
 import base64
 import argparse
 import threading
@@ -153,6 +155,43 @@ class RTSPCaptureThread(threading.Thread):
 
 class CameraWorker(threading.Thread):
     """Worker independiente para un punto de acceso específico."""
+
+    # Parámetros experimentales compartidos entre todas las cámaras para la Tesis
+    active_test_type = "LIVE_USER"
+    active_env_condition = "NORMAL"
+
+    TEST_TYPES = [
+        ("LIVE_USER", "USUARIO VIVO AUTORIZADO (HECTOR)"),
+        ("IMPOSTOR_LIVE", "USUARIO VIVO NO REGISTRADO (IMPOSTOR)"),
+        ("SPOOF_PHOTO_PRINT", "ATAQUE FOTO IMPRESA / PANTALLA"),
+        ("SPOOF_SCREEN_VIDEO", "ATAQUE VIDEO REPLAY PANTALLA"),
+    ]
+
+    ENV_CONDITIONS = [
+        ("NORMAL", "ILUMINACION NORMAL (OFICINA/LAB)"),
+        ("LOW_LIGHT", "BAJA ILUMINACION (< 50 LUX)"),
+        ("HIGH_LIGHT", "ALTA LUZ / CONTRALUZ (> 1000 LUX)"),
+    ]
+
+    _test_idx = 0
+    _env_idx = 0
+
+    @classmethod
+    def cycle_test_type(cls):
+        cls._test_idx = (cls._test_idx + 1) % len(cls.TEST_TYPES)
+        cls.active_test_type = cls.TEST_TYPES[cls._test_idx][0]
+        desc = cls.TEST_TYPES[cls._test_idx][1]
+        print(f"\n🧪 [MODO EXPERIMENTAL] Tipo de Prueba: {cls.active_test_type} ({desc})")
+        return cls.active_test_type, desc
+
+    @classmethod
+    def cycle_env_condition(cls):
+        cls._env_idx = (cls._env_idx + 1) % len(cls.ENV_CONDITIONS)
+        cls.active_env_condition = cls.ENV_CONDITIONS[cls._env_idx][0]
+        desc = cls.ENV_CONDITIONS[cls._env_idx][1]
+        print(f"\n💡 [CONDICION AMBIENTAL] Iluminación: {cls.active_env_condition} ({desc})")
+        return cls.active_env_condition, desc
+
     def __init__(self, config: dict, api_url: str):
         super().__init__(daemon=True)
         self.device_id   = config.get("device_id", "CAM_UNKNOWN")
@@ -161,6 +200,7 @@ class CameraWorker(threading.Thread):
         self.token       = config.get("token", "")
         self.location    = config.get("location", "Borde")
         self.api_url     = api_url
+        self.rotation    = int(config.get("rotation", 0))
 
         self.reader      = RTSPCaptureThread(self.source)
         self.running     = True
@@ -177,6 +217,8 @@ class CameraWorker(threading.Thread):
         self.user_name = ""
         self.user_role = ""
         self.display_frame = None
+        self.latest_clean_face = None
+        self.latest_orig_frame = None
         self.lock = threading.Lock()
 
     def run(self):
@@ -206,7 +248,18 @@ class CameraWorker(threading.Thread):
                 time.sleep(0.1)
                 continue
 
+            # Rotación óptica si la cámara está acostada o en vertical
+            if self.rotation == 90:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif self.rotation == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif self.rotation == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
             orig_frame = frame.copy()
+            with self.lock:
+                self.latest_orig_frame = orig_frame.copy()
+
             # Reducir resolución para mantener FPS alto en el procesamiento MediaPipe
             if frame.shape[1] > 640:
                 frame = cv2.resize(frame, (640, int(frame.shape[0] * 640 / frame.shape[1])))
@@ -228,6 +281,11 @@ class CameraWorker(threading.Thread):
                 ear_r = eye_aspect_ratio(lm.landmark, RIGHT_EYE_IDX, w, h)
                 ear_val = (ear_l + ear_r) / 2.0
                 _, box = crop_face(frame, lm, margin_pct=0.20)
+
+                # Guardar recorte limpio de alta resolución para autenticación pura
+                clean_face_crop, _ = crop_face(orig_frame, lm, margin_pct=0.55)
+                with self.lock:
+                    self.latest_clean_face = clean_face_crop if clean_face_crop is not None else orig_frame
 
                 # Máquina de estados de parpadeo adaptativa (guardar fotograma en alta resolución)
                 self.pre_blink_buf.append(orig_frame)
@@ -251,13 +309,9 @@ class CameraWorker(threading.Thread):
                             self.ear_blink_val = ear_val
                     else:
                         if closed_count >= 1 and can_auth:
-                            # Parpadeo completado -> Disparar autenticación con recorte HD
-                            auth_frame = self.pre_blink_buf[0] if len(self.pre_blink_buf) > 0 else orig_frame
-                            face_crop_img, _ = crop_face(auth_frame, lm, margin_pct=0.35)
-                            if face_crop_img is None:
-                                face_crop_img = auth_frame
-
-                            self.trigger_auth(face_crop_img, t_ear_ms)
+                            # Parpadeo completado (ojos reabiertos) -> Recorte HD perfectamente sincronizado con lm
+                            auth_img = clean_face_crop if clean_face_crop is not None else orig_frame
+                            self.trigger_auth(auth_img, t_ear_ms)
                         fsm_state = "OPEN"
                         closed_count = 0
 
@@ -298,8 +352,16 @@ class CameraWorker(threading.Thread):
 
             time.sleep(0.015)
 
-    def trigger_auth(self, face_img, t_ear_ms):
+    def trigger_auth(self, face_img=None, t_ear_ms=2.5):
         """Lanza la autenticación M2M al Backend de FastAPI en segundo plano."""
+        if face_img is None:
+            with self.lock:
+                face_img = self.latest_clean_face if self.latest_clean_face is not None else self.latest_orig_frame
+
+        if face_img is None:
+            print(f"⚠️ [{self.device_id}] No hay fotograma disponible para autenticar.")
+            return
+
         self.last_auth_time = time.time()
         self.status = "PROCESSING"
         self.status_msg = "AUTENTICANDO..."
@@ -313,8 +375,8 @@ class CameraWorker(threading.Thread):
 
             payload = {
                 "image_base64": b64_img,
-                "test_type": "LIVE_USER",
-                "environmental_condition": "NORMAL",
+                "test_type": CameraWorker.active_test_type,
+                "environmental_condition": CameraWorker.active_env_condition,
                 "edge_ear_time_ms": round(t_ear_ms, 2),
                 "edge_total_time_ms": round(t_ear_ms + 2.0, 2),
                 "ear_open_value": round(self.ear_open_val, 4),
@@ -335,12 +397,12 @@ class CameraWorker(threading.Thread):
                 self.user_role = user.get("role", "Autorizado")
                 self.status = "GRANTED"
                 self.status_msg = f"{self.user_name}"
-                print(f"🎯 [{self.device_id}] ACCESO CONCEDIDO -> {self.user_name} ({self.user_role})")
+                print(f"🎯 [{self.device_id}] ACCESO CONCEDIDO -> {self.user_name} ({self.user_role}) [Modo: {CameraWorker.active_test_type}]")
             else:
                 detail = resp.json().get("detail", "Denegado")
                 self.status = "DENIED"
                 self.status_msg = detail
-                print(f"🚫 [{self.device_id}] ACCESO DENEGADO -> {detail}")
+                print(f"🚫 [{self.device_id}] ACCESO DENEGADO -> {detail} [Modo: {CameraWorker.active_test_type}]")
 
         except Exception as e:
             self.status = "DENIED"
@@ -356,7 +418,33 @@ class CameraWorker(threading.Thread):
 #            CREACIÓN DE PLANTILLA Y CARGA DE CONFIGURACIÓN
 # =========================================================================
 
-def load_or_create_config() -> list:
+def load_or_create_config(api_url: str = DEFAULT_API_URL) -> list:
+    """
+    Carga la configuración de cámaras para el Edge Gateway.
+    Prioridad 1: Auto-sincronización con el servidor FaceSentinel (Zero-Config).
+    Prioridad 2: Archivo local cameras.json (Modo offline / respaldo de caché).
+    """
+    # 1. Intentar Auto-Sincronización remota con el Backend FaceSentinel
+    try:
+        sync_url = api_url.split("/api/v1/")[0] + "/api/v1/devices/sync"
+        res = requests.get(sync_url, timeout=3.0)
+        if res.status_code == 200:
+            remote_configs = res.json()
+            if isinstance(remote_configs, list) and len(remote_configs) > 0:
+                print(f"🌐 Sincronización Automática con FaceSentinel: {len(remote_configs)} cámaras recibidas del servidor.")
+                # Actualizar caché local en disco para permitir modo offline
+                for p in [DATA_CONFIG_PATH, ROOT_CONFIG_PATH]:
+                    try:
+                        os.makedirs(os.path.dirname(p), exist_ok=True)
+                        with open(p, "w", encoding="utf-8") as f:
+                            json.dump(remote_configs, f, indent=4)
+                    except Exception:
+                        pass
+                return remote_configs
+    except Exception as e:
+        print(f"ℹ️ Servidor no disponible para sincronización remota ({e}). Usando caché local.")
+
+    # 2. Respaldo local si el servidor no responde
     paths_to_check = [p for p in [DATA_CONFIG_PATH, ROOT_CONFIG_PATH] if os.path.exists(p) and os.path.getsize(p) > 0]
     
     for path in paths_to_check:
@@ -405,15 +493,17 @@ def load_or_create_config() -> list:
 def main():
     parser = argparse.ArgumentParser(description="FaceSentinel Edge Gateway Multi-Cámara")
     parser.add_argument("--headless", action="store_true", help="Ejecutar como demonio sin ventana gráfica (Raspberry Pi/Servidor)")
+    parser.add_argument("--server", type=str, default=DEFAULT_API_URL, help="URL de la API del Backend FaceSentinel")
     args = parser.parse_args()
 
+    api_url = args.server
     print("=" * 70)
     print("    FaceSentinel — Edge Gateway Multi-Cámara Concurrente (NVR)")
     print("=" * 70)
-    print(f"📡 Backend FastAPI: {DEFAULT_API_URL}")
+    print(f"📡 Backend FastAPI: {api_url}")
     print(f"📁 Configuración:   {CONFIG_PATH}")
 
-    configs = load_or_create_config()
+    configs = load_or_create_config(api_url)
     active_configs = [c for c in configs if c.get("enabled", True)]
 
     if not active_configs:
@@ -428,8 +518,12 @@ def main():
         workers.append(worker)
         print(f"   [+] Worker iniciado para [{cfg.get('device_id')}]: {cfg.get('name')} ({cfg.get('source')})")
 
-    print("\n⌨️  CONTROLES:")
-    print("   [ESPACIO] Forzar escaneo en todas las cámaras")
+    print("\n⌨️  CONTROLES DE BANCO DE PRUEBAS (TESIS):")
+    print("   [T]       Alternar Modo de Prueba (LIVE_USER / IMPOSTOR_LIVE / SPOOF_PHOTO / SPOOF_VIDEO)")
+    print("   [C / E]   Alternar Condición Ambiental (NORMAL / LOW_LIGHT / HIGH_LIGHT)")
+    print("   [ESPACIO] Forzar escaneo/autenticación limpia en todas las cámaras")
+    print("   [B]       Crear copia de respaldo y REINICIAR 'metricas_tesis.csv' limpio")
+    print("   [R]       Rotar cámaras 90° (para ajustar orientación)")
     print("   [Q/ESC]   Detener Gateway y salir")
     print("=" * 70 + "\n")
 
@@ -442,7 +536,7 @@ def main():
             pass
     else:
         cv2.namedWindow("FaceSentinel — Multi-Camera NVR Grid", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("FaceSentinel — Multi-Camera NVR Grid", 1280, 720)
+        cv2.resizeWindow("FaceSentinel — Multi-Camera NVR Grid", 1280, 750)
 
         while True:
             # Ensamblar frames de todas las cámaras activas
@@ -473,17 +567,74 @@ def main():
                 row2 = np.hstack(frames[len(frames)//2:])
                 mosaic = np.vstack((row1, row2))
 
-            cv2.imshow("FaceSentinel — Multi-Camera NVR Grid", mosaic)
+            # Banner superior de telemetría y control experimental (HUD)
+            banner_h = 50
+            banner = np.zeros((banner_h, mosaic.shape[1], 3), dtype=np.uint8)
+            cv2.rectangle(banner, (0, 0), (mosaic.shape[1], banner_h), (25, 25, 25), -1)
+
+            # Color dinámico según tipo de prueba
+            cur_mode = CameraWorker.active_test_type
+            if cur_mode == "LIVE_USER":
+                mode_color = (0, 230, 0)      # Verde brillante
+            elif cur_mode == "IMPOSTOR_LIVE":
+                mode_color = (0, 160, 255)    # Naranja
+            elif "PHOTO" in cur_mode:
+                mode_color = (0, 0, 240)      # Rojo
+            else:
+                mode_color = (220, 0, 220)    # Magenta para Video Replay
+
+            # Texto de cabecera
+            cv2.putText(banner, f"MODO TEST: {cur_mode}", (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.58, mode_color, 2)
+            cv2.putText(banner, f"ILUMINACION: {CameraWorker.active_env_condition}", (420, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 220, 0), 2)
+            cv2.putText(banner, "[T]: Cambiar Modo  |  [C]: Cambiar Luz  |  [ESPACIO]: Forzar Auth  |  [B]: Limpiar CSV  |  [R]: Rotar  |  [Q]: Salir", 
+                        (15, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1)
+
+            full_display = np.vstack((banner, mosaic))
+            cv2.imshow("FaceSentinel — Multi-Camera NVR Grid", full_display)
             key = cv2.waitKey(20) & 0xFF
 
             if key in [ord('q'), ord('Q'), 27]:
                 break
-            elif key == 32:  # Barra espaciadora: forzar escaneo
-                print("▶️  [ESPACIO] Forzando escaneo en todas las cámaras activas...")
+            elif key in [ord('t'), ord('T')]:
+                CameraWorker.cycle_test_type()
+            elif key in [ord('c'), ord('C'), ord('e'), ord('E')]:
+                CameraWorker.cycle_env_condition()
+            elif key in [ord('b'), ord('B')]:
+                # Respaldo seguro del CSV y reinicio limpio
+                csv_path = os.path.join(BASE_DIR, "data", "metricas_tesis.csv")
+                if os.path.exists(csv_path):
+                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_path = os.path.join(BASE_DIR, "data", f"metricas_tesis_backup_{ts_str}.csv")
+                    try:
+                        shutil.copy2(csv_path, backup_path)
+                        # Limpiar CSV activo manteniendo encabezados
+                        try:
+                            from app.services.metrics_collector import CSV_HEADERS
+                        except Exception:
+                            CSV_HEADERS = [
+                                "timestamp","test_type","environmental_condition","user_id","granted",
+                                "rejection_reason","t_ear_edge_ms","t_edge_total_ms","t_network_rtt_ms",
+                                "t_lbp_ms","t_fft_ms","t_arcface_ms","t_chroma_ms","t_sqlite_ms",
+                                "t_backend_total_ms","t_total_end2end_ms","ear_open","ear_blink",
+                                "lbp_entropy","lbp_threshold","lbp_variance","liveness_score",
+                                "cosine_distance","match_threshold","bc_tx_hash","bc_gas_used",
+                                "bc_block_number","bc_seal_time_ms"
+                            ]
+                        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(CSV_HEADERS)
+                        print(f"\n📦 [RESPALDO EXITOSO] Archivo guardado en: {backup_path}")
+                        print("✨ 'metricas_tesis.csv' ha sido reiniciado. ¡Listo para tus corridas oficiales de tesis!\n")
+                    except Exception as ex:
+                        print(f"⚠️ Error al respaldar CSV: {ex}")
+            elif key in [ord('r'), ord('R')]:
                 for w in workers:
-                    with w.lock:
-                        if w.display_frame is not None:
-                            w.trigger_auth(w.display_frame, 2.5)
+                    w.rotation = (w.rotation + 90) % 360
+                    print(f"🔄 Cámara [{w.device_id}] rotación: {w.rotation}°")
+            elif key == 32:  # Barra espaciadora: forzar escaneo con recorte limpio
+                print(f"▶️  [ESPACIO] Forzando escaneo limpio | MODO: {CameraWorker.active_test_type} | AMBIENTE: {CameraWorker.active_env_condition}")
+                for w in workers:
+                    w.trigger_auth(None, 2.5)
 
     print("\n🛑 Deteniendo Workers de cámaras...")
     for w in workers:

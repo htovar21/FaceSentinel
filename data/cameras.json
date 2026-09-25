@@ -1,15 +1,25 @@
 [
     {
+        "device_id": "IPHONE6",
+        "name": "Iphone6",
+        "token": "hw_iphone6_token",
+        "source": "http://192.168.80.173:4747/video",
+        "location": "Punto de Acceso",
+        "enabled": false,
+        "lbp_threshold": 3.595
+    },
+    {
         "device_id": "TLFHECTOR",
         "name": "Smart 20 Hector",
         "token": "hw_tlfhector_secret_key_8832a74ayV8",
         "source": "http://192.168.80.89:4747/video",
-        "location": "Punto de Acceso M\u00f3vil",
-        "enabled": false
+        "location": "Punto de Acceso",
+        "enabled": false,
+        "lbp_threshold": 3.563
     },
     {
         "device_id": "PASILLO62",
-        "name": "Pasillo 6-2",
+        "name": "pasillo 6-2",
         "token": "hw_zaEy9rg43tK6QZa0e9O_oDE_spala6yRm71hA74ayV8",
         "source": "rtsp://admin1:cimos.1979@192.168.70.10:554/Streaming/Channels/201",
         "location": "Patio B",
@@ -22,7 +32,8 @@
         "token": "hw_door_01_token_aqui",
         "source": "0",
         "location": "Entrada Principal",
-        "enabled": false
+        "enabled": false,
+        "lbp_threshold": 3.2
     },
     {
         "device_id": "GATEWAY_TEST_01",
@@ -30,7 +41,8 @@
         "token": "hw_gateway_test_01_token_aqui",
         "source": "0",
         "location": "Entrada Biblioteca",
-        "enabled": false
+        "enabled": false,
+        "lbp_threshold": 3.2
     },
     {
         "device_id": "doo2",
@@ -38,7 +50,8 @@
         "token": "hw_doo2_token_aqui",
         "source": "0",
         "location": "Edificio administrativo",
-        "enabled": false
+        "enabled": false,
+        "lbp_threshold": 3.2
     },
     {
         "device_id": "door1",
@@ -46,6 +59,7 @@
         "token": "hw_door1_token_aqui",
         "source": "0",
         "location": "Edificio administrativo",
-        "enabled": false
+        "enabled": false,
+        "lbp_threshold": 3.2
     }
 ]

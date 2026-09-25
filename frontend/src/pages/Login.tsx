@@ -322,6 +322,9 @@ export default function Login() {
                     }, 3000)
                 } else if (data.status === "tracking" || data.status === "no_face") {
                     setLivenessMessage(data.message)
+                    if (data.metrics) {
+                        setLivenessMetrics(data.metrics)
+                    }
                 } else if (data.status === "error") {
                     setError("Error del servidor: " + data.message)
                     stopCameraAndSocket()
@@ -573,7 +576,7 @@ export default function Login() {
                                                 <span className="col-span-1 text-right">Impacto</span>
                                             </div>
 
-                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.blink?.value < 0.16 ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
+                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${step === 'success' || (typeof livenessMetrics.blink?.value === 'number' && livenessMetrics.blink.value < 0.20) ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
                                                 <span className="col-span-1 font-semibold flex items-center gap-1">EAR</span>
                                                 <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">
                                                     {typeof livenessMetrics.blink?.value === 'number' ? livenessMetrics.blink.value.toFixed(3) : '0.000'}
@@ -582,12 +585,12 @@ export default function Login() {
                                                 <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Pre-req<br />Biométrico</span>
                                             </div>
 
-                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${livenessMetrics.texture?.value >= 4.75 ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
+                                            <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${step === 'success' || (livenessMetrics?.texture?.passed ?? (typeof livenessMetrics?.texture?.value === 'number' && livenessMetrics.texture.value >= 3.20)) ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
                                                 <span className="col-span-1 font-semibold flex items-center gap-1">LBP</span>
                                                 <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight">
-                                                    {typeof livenessMetrics.texture?.value === 'number' ? livenessMetrics.texture.value.toFixed(3) : '0.000'}
+                                                    {typeof livenessMetrics?.texture?.value === 'number' ? livenessMetrics.texture.value.toFixed(3) : '0.000'}
                                                 </span>
-                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.texture?.threshold || '>= 4.75'}</span>
+                                                <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics?.texture?.threshold || '>= 3.20'}</span>
                                                 <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Densidad<br />Textura 3D</span>
                                             </div>
 
@@ -600,11 +603,22 @@ export default function Login() {
                                                 <span className="col-span-1 text-right text-[10px] leading-tight">Bypass<br />(OLEDs)</span>
                                             </div>
 
+                                            {livenessMetrics?.pose && (
+                                                <div className={`grid grid-cols-4 gap-2 items-center p-3 rounded-md transition-all ${step === 'success' || livenessMetrics.pose?.passed ? 'bg-green-500/10 border-l-4 border-green-500 text-green-800 dark:text-green-300' : 'bg-amber-500/10 border-l-4 border-amber-500 text-amber-800 dark:text-amber-300'}`}>
+                                                    <span className="col-span-1 font-semibold flex items-center gap-1">Reto</span>
+                                                    <span className="col-span-1 text-center font-mono font-bold text-xs tracking-tight">
+                                                        {typeof livenessMetrics.pose?.value === 'number' ? `${livenessMetrics.pose.value > 0 ? '+' : ''}${livenessMetrics.pose.value.toFixed(1)}` : (livenessMetrics.pose?.value || '2/2 OK')}
+                                                    </span>
+                                                    <span className="col-span-1 text-center font-mono opacity-80">{livenessMetrics.pose?.threshold || 'Reto OK'}</span>
+                                                    <span className="col-span-1 text-right text-[10px] opacity-70 leading-tight">Anti-Replay<br />Secuencial</span>
+                                                </div>
+                                            )}
+
                                             {typeof authDistance === 'number' && (
                                                 <div className="grid grid-cols-4 gap-2 items-center p-3 rounded-md bg-primary/10 border-l-4 border-primary mt-4 pt-3 shadow-sm transform scale-105 origin-left transition-all">
                                                     <span className="col-span-1 font-bold text-primary">ArcFace</span>
                                                     <span className="col-span-1 text-center font-mono font-bold text-sm tracking-tight text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]">{authDistance.toFixed(4)}</span>
-                                                    <span className="col-span-1 text-center font-mono text-primary/80 font-medium">&lt; 0.68</span>
+                                                    <span className="col-span-1 text-center font-mono text-primary/80 font-medium">&lt; 0.70</span>
                                                     <span className="col-span-1 text-right text-[10px] font-bold text-primary/90 leading-tight">Match<br />Identidad</span>
                                                 </div>
                                             )}

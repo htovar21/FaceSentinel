@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Activity, ShieldCheck, Lock, LogOut, User, Trash2, Clock, CheckCircle2, XCircle } from "lucide-react"
+import { Activity, ShieldCheck, Lock, LogOut, User, Trash2, Clock, CheckCircle2, XCircle, Camera, RefreshCw, AlertCircle, X, Upload } from "lucide-react"
 import axios from "axios"
 import { API_BASE_URL } from "@/config/api"
 import AdminPanel from "../components/AdminPanel"
@@ -33,6 +33,130 @@ export default function Dashboard() {
 
     const [activeTab, setActiveTab] = useState<"user" | "admin">(userRole.toLowerCase() === "admin" ? "admin" : "user")
     const baseUrl = API_BASE_URL
+
+    // Self-re-enrollment state
+    const [isReenrolling, setIsReenrolling] = useState(false)
+    const [selfStream, setSelfStream] = useState<MediaStream | null>(null)
+    const [reEnrollLoading, setReEnrollLoading] = useState(false)
+    const [reEnrollSuccess, setReEnrollSuccess] = useState("")
+    const [reEnrollError, setReEnrollError] = useState("")
+    const selfVideoRef = useRef<HTMLVideoElement | null>(null)
+    const selfStreamRef = useRef<MediaStream | null>(null)
+
+    const startSelfCamera = async () => {
+        setIsReenrolling(true)
+        setReEnrollSuccess("")
+        setReEnrollError("")
+        try {
+            let stream: MediaStream
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+                })
+            } catch {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true })
+            }
+            selfStreamRef.current = stream
+            setSelfStream(stream)
+            if (selfVideoRef.current) {
+                selfVideoRef.current.srcObject = stream
+                selfVideoRef.current.play().catch(() => {})
+            }
+        } catch (err: any) {
+            if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+                setReEnrollError("Permiso denegado. Permite el acceso a la cámara en el navegador.")
+            } else if (err?.name === "NotReadableError" || err?.name === "TrackStartError") {
+                setReEnrollError("La cámara web está siendo ocupada por otra aplicación o pestaña.")
+            } else {
+                setReEnrollError("No se pudo acceder a la cámara web (" + (err?.message || "Error") + ").")
+            }
+        }
+    }
+
+    const stopSelfCamera = () => {
+        if (selfStreamRef.current) {
+            selfStreamRef.current.getTracks().forEach(track => track.stop())
+            selfStreamRef.current = null
+        }
+        if (selfStream) {
+            selfStream.getTracks().forEach(track => track.stop())
+            setSelfStream(null)
+        }
+        if (selfVideoRef.current) {
+            selfVideoRef.current.srcObject = null
+        }
+        setIsReenrolling(false)
+    }
+
+    useEffect(() => {
+        if (isReenrolling && selfVideoRef.current && selfStream) {
+            selfVideoRef.current.srcObject = selfStream
+            selfVideoRef.current.play().catch(e => console.error("Error reproduciendo video:", e))
+        }
+    }, [isReenrolling, selfStream])
+
+    const captureAndReEnrollSelf = async () => {
+        if (!selfVideoRef.current) return
+        setReEnrollLoading(true)
+        setReEnrollError("")
+
+        const video = selfVideoRef.current
+        const width = video.videoWidth || 640
+        const height = video.videoHeight || 480
+
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        ctx.drawImage(video, 0, 0, width, height)
+        const base64Image = canvas.toDataURL("image/jpeg")
+
+        const token = localStorage.getItem("token") || ""
+        try {
+            const res = await axios.put(`${baseUrl}/api/v1/users/me/biometrics`, {
+                image_base64: base64Image
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            setReEnrollSuccess(res.data?.message || "¡Tu biometría facial ha sido actualizada con éxito!")
+            stopSelfCamera()
+        } catch (err: any) {
+            setReEnrollError(err.response?.data?.detail || "Error al actualizar tu biometría facial.")
+        } finally {
+            setReEnrollLoading(false)
+        }
+    }
+
+    const handleSelfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        setReEnrollLoading(true)
+        setReEnrollError("")
+        const reader = new FileReader()
+        reader.onload = async (ev) => {
+            const base64Image = ev.target?.result as string
+            if (!base64Image) {
+                setReEnrollLoading(false)
+                return
+            }
+            const token = localStorage.getItem("token") || ""
+            try {
+                const res = await axios.put(`${baseUrl}/api/v1/users/me/biometrics`, {
+                    image_base64: base64Image
+                }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+                setReEnrollSuccess(res.data?.message || "¡Tu biometría facial ha sido actualizada con éxito!")
+                stopSelfCamera()
+            } catch (err: any) {
+                setReEnrollError(err.response?.data?.detail || "Error al actualizar tu biometría facial.")
+            } finally {
+                setReEnrollLoading(false)
+            }
+        }
+        reader.readAsDataURL(file)
+    }
 
     useEffect(() => {
         if (!userId) {
@@ -110,6 +234,29 @@ export default function Dashboard() {
             </header>
 
             <main className="flex-1 container mx-auto p-4 md:p-8 space-y-6">
+                {reEnrollSuccess && (
+                    <div className="p-3 rounded-md bg-green-500/15 text-green-700 dark:text-green-400 text-sm font-medium flex items-center justify-between border border-green-500/20">
+                        <div className="flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4" />
+                            {reEnrollSuccess}
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setReEnrollSuccess("")}>
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
+                )}
+                {reEnrollError && (
+                    <div className="p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium flex items-center justify-between border border-destructive/20">
+                        <div className="flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4" />
+                            {reEnrollError}
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setReEnrollError("")}>
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
+                )}
+
                 {userRole.toLowerCase() === "developer" ? (
                     <DeveloperPanel />
                 ) : userRole.toLowerCase() !== "admin" ? (
@@ -140,12 +287,21 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                             </CardContent>
-                            <CardFooter className="z-10 relative pt-2">
+                            <CardFooter className="z-10 relative pt-2 flex flex-col gap-2">
+                                <Button 
+                                    className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30" 
+                                    variant="outline"
+                                    onClick={startSelfCamera}
+                                >
+                                    <Camera className="h-4 w-4 mr-2" />
+                                    Actualizar Mi Rostro
+                                </Button>
                                 <Button 
                                     className="w-full" 
                                     variant="outline"
                                     onClick={handleLogout}
                                 >
+                                    <LogOut className="h-4 w-4 mr-2" />
                                     Cerrar Sesión
                                 </Button>
                             </CardFooter>
@@ -198,11 +354,20 @@ export default function Dashboard() {
                                             <p className="text-xs text-muted-foreground mt-1">ID: {userId}</p>
                                             <p className="text-xs text-muted-foreground">Rol: {userRole}</p>
                                         </CardContent>
-                                        <CardFooter className="pt-0">
+                                        <CardFooter className="pt-0 flex flex-col gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full mt-4 border-primary/30 hover:bg-primary/10 text-primary font-medium"
+                                                onClick={startSelfCamera}
+                                            >
+                                                <Camera className="h-4 w-4 mr-2" />
+                                                Actualizar Mi Rostro
+                                            </Button>
                                             <Button
                                                 variant="destructive"
                                                 size="sm"
-                                                className="w-full mt-4 bg-red-500/10 text-red-600 hover:bg-red-500/20 shadow-none border border-red-200"
+                                                className="w-full bg-red-500/10 text-red-600 hover:bg-red-500/20 shadow-none border border-red-200"
                                                 onClick={handleDeleteAccount}
                                                 disabled={deleteLoading}
                                             >
@@ -341,6 +506,80 @@ export default function Dashboard() {
                             </>
                         )}
                     </>
+                )}
+                {/* Modal Flotante de Captura de Cámara para Auto-Re-Enrolamiento */}
+                {isReenrolling && (
+                    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
+                        <Card className="w-full max-w-lg border-primary shadow-2xl bg-card">
+                            <CardHeader className="flex flex-row items-center justify-between pb-3">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2 text-primary text-lg">
+                                        <Camera className="w-5 h-5" /> Actualizar Biometría Facial
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Ubica tu rostro dentro del óvalo guía con buena iluminación frontal.
+                                    </CardDescription>
+                                </div>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={stopSelfCamera} disabled={reEnrollLoading}>
+                                    <X className="h-4 w-4" />
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="flex flex-col items-center space-y-4">
+                                <div className="relative overflow-hidden rounded-xl aspect-video w-full flex items-center justify-center bg-black shadow-inner border border-primary/30">
+                                    <video
+                                        ref={(el) => {
+                                            selfVideoRef.current = el
+                                            if (el && selfStream && el.srcObject !== selfStream) {
+                                                el.srcObject = selfStream
+                                                el.play().catch(() => {})
+                                            }
+                                        }}
+                                        autoPlay
+                                        playsInline
+                                        muted
+                                        onLoadedMetadata={(e) => {
+                                            (e.target as HTMLVideoElement).play().catch(() => {})
+                                        }}
+                                        className="h-full w-full object-cover transform scale-x-[-1]"
+                                    />
+                                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                        <div className="w-1/2 h-3/4 border-2 border-primary/70 rounded-[45%] border-dashed shadow-[0_0_15px_rgba(0,255,200,0.3)] animate-pulse" />
+                                    </div>
+                                </div>
+                                <div className="flex gap-3 w-full">
+                                    <Button variant="outline" className="w-full" onClick={stopSelfCamera} disabled={reEnrollLoading}>
+                                        Cancelar
+                                    </Button>
+                                    <Button 
+                                        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold" 
+                                        onClick={captureAndReEnrollSelf} 
+                                        disabled={reEnrollLoading}
+                                    >
+                                        {reEnrollLoading ? (
+                                            <span className="flex items-center gap-2">
+                                                <RefreshCw className="w-4 h-4 animate-spin" /> Procesando Vector...
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-2">
+                                                <Camera className="w-4 h-4" /> Capturar y Guardar
+                                            </span>
+                                        )}
+                                    </Button>
+                                </div>
+                                <div className="relative flex py-1 items-center w-full">
+                                    <div className="flex-grow border-t border-muted"></div>
+                                    <span className="flex-shrink mx-3 text-[11px] text-muted-foreground uppercase font-medium">O si la cámara está ocupada</span>
+                                    <div className="flex-grow border-t border-muted"></div>
+                                </div>
+                                <label className="w-full cursor-pointer">
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleSelfFileUpload} disabled={reEnrollLoading} />
+                                    <div className="w-full inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-muted/60 hover:bg-muted py-2 px-4 shadow-sm transition-colors text-foreground gap-2">
+                                        <Upload className="w-4 h-4 text-primary" /> Subir Foto o Selfie desde Archivo
+                                    </div>
+                                </label>
+                            </CardContent>
+                        </Card>
+                    </div>
                 )}
             </main>
         </div>

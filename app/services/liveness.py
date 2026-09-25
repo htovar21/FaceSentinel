@@ -8,6 +8,7 @@ Combina múltiples técnicas para detectar ataques de presentación:
 5. Score compuesto — Combinación ponderada de todas las señales
 """
 
+from typing import Optional
 import math
 import time
 import logging
@@ -41,6 +42,8 @@ LEFT_EYE_CORNER = 33
 RIGHT_EYE_CORNER = 263
 LEFT_MOUTH = 61
 RIGHT_MOUTH = 291
+UPPER_LIP = 13
+LOWER_LIP = 14
 
 
 # =========================================================================
@@ -131,18 +134,22 @@ class BlinkTracker:
 #          MÓDULO 2: ANÁLISIS DE TEXTURA (LBP - Local Binary Patterns)
 # =========================================================================
 
-def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
+def analyze_texture(frame_bgr, custom_lbp_threshold: Optional[float] = 3.2, adaptive_threshold: bool = False) -> dict:
     """
     Analiza la textura facial para distinguir piel real de pantallas/impresiones.
-    Las fotos de pantalla y las impresiones tienen patrones LBP más uniformes
-    que la piel real, que tiene poros, arrugas y micro-texturas únicas.
+    Soporta dos modalidades de umbralización:
+    1. Fija por hardware: usa custom_lbp_threshold configurado para cámaras M2M en SQLite/cameras.json.
+    2. Adaptativa guiada por calidad (Quality-Aware): para SSO WebSockets, interpola dinámicamente entre
+       3.20 (webcam genérica de baja nitidez) y 3.58 (sensor móvil de alta nitidez) evaluando la
+       varianza del Laplaciano (nitidez óptica) y la escala del ROI facial en resolución nativa.
 
     Args:
         frame_bgr: Frame en formato BGR (OpenCV)
-        custom_lbp_threshold: Umbral de entropía LBP dinámico configurado para el dispositivo
+        custom_lbp_threshold: Umbral de entropía LBP fijo configurado para el dispositivo
+        adaptive_threshold: Si True, interpola el umbral según la calidad óptica del sensor
 
     Returns:
-        dict con score de textura, entropía, tiempos y si parece real
+        dict con score de textura, entropía, tiempos, nitidez y si parece real
     """
     t0 = time.perf_counter()
     try:
@@ -162,30 +169,49 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
             x2 = min(w, int(max(xs)))
             y2 = min(h, int(max(ys)))
             if (x2 - x1) >= 32 and (y2 - y1) >= 32:
-                face_roi = gray[y1:y2, x1:x2]
+                raw_face_roi = gray[y1:y2, x1:x2]
             else:
-                face_roi = gray
+                raw_face_roi = gray
         else:
             # Fallback robusto: si la imagen ya viene recortada del borde o MediaPipe no converge,
             # analizamos la región facial central
             h, w = gray.shape[:2]
             if h >= 32 and w >= 32:
-                face_roi = gray[int(h * 0.1):int(h * 0.9), int(w * 0.1):int(w * 0.9)]
+                raw_face_roi = gray[int(h * 0.1):int(h * 0.9), int(w * 0.1):int(w * 0.9)]
             else:
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                fallback_thresh = custom_lbp_threshold if custom_lbp_threshold is not None else 3.20
                 return {
                     "is_real": False,
                     "texture_score": 0.0,
                     "entropy": 0.0,
-                    "lbp_threshold": round(custom_lbp_threshold, 4),
+                    "lbp_threshold": round(fallback_thresh, 4),
                     "variance": 0.0,
                     "energy": 0.0,
+                    "sharpness": 0.0,
+                    "quality_score": 0.0,
+                    "face_roi_size": [0, 0],
                     "time_ms": round(elapsed_ms, 2),
                     "reason": "No se detectó rostro"
                 }
 
-        # Redimensionar para consistencia
-        face_roi = cv2.resize(face_roi, (128, 128))
+        # 1. Medición de calidad óptica en resolución nativa antes del redimensionamiento:
+        # - Varianza del Laplaciano (alta frecuencia / nitidez de la óptica del sensor)
+        # - Área/escala real del ROI facial
+        roi_h, roi_w = raw_face_roi.shape[:2]
+        face_size = min(roi_w, roi_h)
+        laplacian_var = float(cv2.Laplacian(raw_face_roi, cv2.CV_64F).var())
+
+        # Normalización del índice de calidad óptica Q in [0.0, 1.0]
+        # Calibración empírica:
+        # - Webcam laptop (óptica suave/ruido difuso): laplacian_var ~80-150, face_size ~100-140 -> Q ~0.0-0.2
+        # - Sensor móvil Smart 20 / HD (óptica nítida): laplacian_var ~300-800+, face_size >=200 -> Q ~0.8-1.0
+        sharpness_norm = float(np.clip((laplacian_var - 80.0) / (320.0 - 80.0), 0.0, 1.0))
+        resolution_norm = float(np.clip((face_size - 90.0) / (240.0 - 90.0), 0.0, 1.0))
+        quality_score = float(0.70 * sharpness_norm + 0.30 * resolution_norm)
+
+        # 2. Redimensionar para análisis LBP estandarizado
+        face_roi = cv2.resize(raw_face_roi, (128, 128))
 
         # Calcular LBP uniforme con skimage (C compilado, ~50x más rápido)
         lbp = local_binary_pattern(face_roi, P=16, R=2, method="uniform")
@@ -197,28 +223,22 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
         hist /= (hist.sum() + 1e-7)
 
         # Métricas de textura:
-        # 1. Varianza del histograma (en pantallas LCD/OLED, la matriz de subpíxeles
-        #    genera picos periódicos localizados con varianza > 0.00245; la piel real es homogénea <= 0.00235)
         variance = np.var(hist)
-
-        # 2. Entropía (piel real tiene más entropía / micro-desorden natural)
         entropy = -np.sum(hist * np.log2(hist + 1e-7))
-
-        # 3. Energía (fotos y pantallas tienen más energía concentrada)
         energy = np.sum(hist ** 2)
 
-        # Detección bimodal: Si la varianza indica artefactos de pantalla digital (>= 0.0038),
-        # se eleva el umbral efectivo para compensar la emisión de luz y compresión del video.
-        # La compresión natural de RTSP H.264/WiFi se ubica en ~0.0022 - 0.0033.
-        has_screen_artifacts = (variance >= 0.0038)
-        effective_threshold = (custom_lbp_threshold + 0.04) if has_screen_artifacts else custom_lbp_threshold
+        # 3. Determinación del umbral efectivo:
+        if custom_lbp_threshold is not None:
+            effective_threshold = float(custom_lbp_threshold)
+        elif adaptive_threshold:
+            effective_threshold = round(3.20 + (3.58 - 3.20) * quality_score, 4)
+        else:
+            effective_threshold = 3.20
 
         is_real = entropy >= effective_threshold
 
         # Score normalizado según el umbral efectivo
         texture_score = min(1.0, max(0.0, (entropy - (effective_threshold - 0.4)) / 0.8))
-        if has_screen_artifacts and is_real:
-            texture_score *= 0.85
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -229,20 +249,27 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
             "lbp_threshold": round(effective_threshold, 4),
             "variance": round(variance, 6),
             "energy": round(energy, 6),
-            "has_screen_artifacts": has_screen_artifacts,
+            "has_screen_artifacts": False,
+            "sharpness": round(laplacian_var, 2),
+            "quality_score": round(quality_score, 4),
+            "face_roi_size": [roi_w, roi_h],
             "time_ms": round(elapsed_ms, 2),
         }
 
     except Exception as e:
         logger.error(f"Error en análisis de textura: {e}")
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        fallback_thresh = custom_lbp_threshold if custom_lbp_threshold is not None else 3.20
         return {
             "is_real": True,
             "texture_score": 0.5,
             "entropy": 0.0,
-            "lbp_threshold": round(custom_lbp_threshold, 4),
+            "lbp_threshold": round(fallback_thresh, 4),
             "variance": 0.0,
             "energy": 0.0,
+            "sharpness": 0.0,
+            "quality_score": 0.0,
+            "face_roi_size": [0, 0],
             "time_ms": round(elapsed_ms, 2),
             "reason": "Error en análisis"
         }
@@ -339,7 +366,7 @@ def estimate_head_pose(frame_rgb) -> dict:
     results = face_mesh.process(frame_rgb)
 
     if not results.multi_face_landmarks:
-        return {"detected": False, "yaw": 0, "pitch": 0, "roll": 0}
+        return {"detected": False, "yaw": 0, "pitch": 0, "roll": 0, "mar": 0.0}
 
     landmarks = results.multi_face_landmarks[0]
 
@@ -365,11 +392,21 @@ def estimate_head_pose(frame_rgb) -> dict:
     dx = right_eye.x - left_eye.x
     roll = math.degrees(math.atan2(dy, dx))
 
+    # MAR (Mouth Aspect Ratio): apertura de boca
+    upper_lip = landmarks.landmark[UPPER_LIP]
+    lower_lip = landmarks.landmark[LOWER_LIP]
+    left_mouth = landmarks.landmark[LEFT_MOUTH]
+    right_mouth = landmarks.landmark[RIGHT_MOUTH]
+    mouth_height = _euclidean_distance(upper_lip, lower_lip)
+    mouth_width = _euclidean_distance(left_mouth, right_mouth)
+    mar = mouth_height / (mouth_width + 1e-7)
+
     return {
         "detected": True,
         "yaw": round(yaw, 2),
         "pitch": round(pitch, 2),
         "roll": round(roll, 2),
+        "mar": round(mar, 3),
     }
 
 

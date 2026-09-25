@@ -37,7 +37,10 @@ export default function IoTDevicesView() {
     const [editThreshold, setEditThreshold] = useState("3.670")
     const [editStreamUrl, setEditStreamUrl] = useState("")
     const [editLocation, setEditLocation] = useState("")
+    const [editActive, setEditActive] = useState(true)
     const [savingEdit, setSavingEdit] = useState(false)
+    const [syncing, setSyncing] = useState(false)
+    const [syncSuccess, setSyncSuccess] = useState("")
 
     // Auto-calibración sensorial en vivo desde la plataforma web
     const [autoCalibrating, setAutoCalibrating] = useState(false)
@@ -141,8 +144,40 @@ export default function IoTDevicesView() {
         setEditThreshold(String(device.lbp_threshold || 3.670))
         setEditStreamUrl(device.stream_url || "")
         setEditLocation(device.location || "")
+        setEditActive(device.is_active)
         setCalibResult(null)
         setCalibError("")
+    }
+
+    const handleToggleActive = async (device: IoTDevice) => {
+        const newActiveState = !device.is_active
+        setDevices(prev => prev.map(d => d.device_id === device.device_id ? { ...d, is_active: newActiveState } : d))
+        try {
+            await axios.patch(`${baseUrl}/api/v1/devices/${device.device_id}`, {
+                is_active: newActiveState
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            fetchDevices()
+        } catch (err: any) {
+            alert(err.response?.data?.detail || "Error al actualizar estado del dispositivo.")
+            fetchDevices()
+        }
+    }
+
+    const handleSyncWithGateways = async () => {
+        setSyncing(true)
+        setSyncSuccess("")
+        try {
+            const res = await axios.get(`${baseUrl}/api/v1/devices/sync`)
+            const activeCount = (res.data || []).filter((c: any) => c.enabled).length
+            setSyncSuccess(`¡Sincronización remota exitosa! ${activeCount} cámaras activas listas para aprovisionar Edge Gateways / Raspberry Pi.`)
+            setTimeout(() => setSyncSuccess(""), 5000)
+        } catch (err: any) {
+            setError("Error al sincronizar con el backend.")
+        } finally {
+            setSyncing(false)
+        }
     }
 
     const handleAutoCalibrate = async () => {
@@ -174,7 +209,8 @@ export default function IoTDevicesView() {
             await axios.patch(`${baseUrl}/api/v1/devices/${editingDevice.device_id}`, {
                 lbp_threshold: parseFloat(editThreshold) || 3.670,
                 stream_url: editStreamUrl.trim() || null,
-                location: editLocation.trim() || null
+                location: editLocation.trim() || null,
+                is_active: editActive
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
@@ -229,17 +265,34 @@ export default function IoTDevicesView() {
                     <Button 
                         variant="outline" 
                         size="sm" 
+                        onClick={handleSyncWithGateways} 
+                        disabled={syncing}
+                        className="border-green-600/40 text-green-700 dark:text-green-400 hover:bg-green-500/10 shadow-sm"
+                        title="Sincronizar en caliente todas las cámaras con los Edge Gateways"
+                    >
+                        <RefreshCw className={`h-4 w-4 mr-1.5 ${syncing ? "animate-spin" : ""}`} /> Sincronizar Edge Gateways
+                    </Button>
+                    <Button 
+                        variant="outline" 
+                        size="sm" 
                         onClick={() => setExportModalOpen(true)}
                         className="border-primary/40 text-primary hover:bg-primary/10 shadow-sm"
                         title="Exportar configuración cameras.json para el Edge Gateway"
                     >
-                        <Download className="h-4 w-4 mr-1.5" /> Exportar cameras.json
+                        <Download className="h-4 w-4 mr-1.5" /> Exportar JSON
                     </Button>
                     <Button variant="outline" size="sm" onClick={fetchDevices} disabled={loading}>
                         <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Actualizar
                     </Button>
                 </div>
             </div>
+
+            {syncSuccess && (
+                <div className="p-3 rounded-md bg-green-500/15 text-green-700 dark:text-green-400 text-sm font-medium flex items-center gap-2 border border-green-500/30">
+                    <Check className="h-4 w-4" />
+                    {syncSuccess}
+                </div>
+            )}
 
             {error && (
                 <div className="p-3 rounded-md bg-destructive/15 text-destructive text-sm font-medium flex items-center gap-2">
@@ -376,6 +429,7 @@ export default function IoTDevicesView() {
                                             <th className="px-3 py-2.5">Stream / Tipo</th>
                                             <th className="px-3 py-2.5">Calibración LBP</th>
                                             <th className="px-3 py-2.5">Ubicación</th>
+                                            <th className="px-3 py-2.5">Estado Edge</th>
                                             <th className="px-3 py-2.5 rounded-tr-md text-right">Acciones</th>
                                         </tr>
                                     </thead>
@@ -410,6 +464,22 @@ export default function IoTDevicesView() {
                                                     ) : (
                                                         <span className="italic text-muted-foreground/60">—</span>
                                                     )}
+                                                </td>
+                                                <td className="px-3 py-2.5">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleToggleActive(device)}
+                                                        className={`h-6 text-[11px] font-semibold px-2 rounded-full border transition-all flex items-center gap-1.5 ${
+                                                            device.is_active
+                                                                ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30 hover:bg-green-500/20"
+                                                                : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                                                        }`}
+                                                        title={device.is_active ? "Haz clic para desactivar (pausar en Edge Gateway)" : "Haz clic para activar (iniciar en Edge Gateway)"}
+                                                    >
+                                                        <span className={`h-2 w-2 rounded-full ${device.is_active ? "bg-green-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                                                        {device.is_active ? "Activa" : "Inactiva"}
+                                                    </Button>
                                                 </td>
                                                 <td className="px-3 py-2.5 text-right space-x-1">
                                                     <Button 
@@ -499,6 +569,24 @@ export default function IoTDevicesView() {
                                     value={editLocation}
                                     onChange={e => setEditLocation(e.target.value)}
                                 />
+                            </div>
+
+                            {/* Toggle de Activación en Edge Gateway */}
+                            <div className="flex items-center justify-between p-2.5 rounded-lg border bg-muted/40">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-semibold">Estado en Edge Gateway</Label>
+                                    <p className="text-[10px] text-muted-foreground">Si está activa, el gateway iniciará el worker de captura para este punto.</p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant={editActive ? "default" : "outline"}
+                                    size="sm"
+                                    className={editActive ? "bg-green-600 hover:bg-green-700 text-white text-xs h-7 px-3" : "text-xs h-7 px-3"}
+                                    onClick={() => setEditActive(!editActive)}
+                                >
+                                    <span className={`h-2 w-2 rounded-full mr-1.5 ${editActive ? "bg-white animate-pulse" : "bg-muted-foreground"}`} />
+                                    {editActive ? "Cámara Activa" : "Cámara Inactiva"}
+                                </Button>
                             </div>
                             {/* Asistente de Auto-Calibración Sensorial en Vivo */}
                             <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 space-y-2.5 mt-2">

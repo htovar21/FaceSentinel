@@ -96,6 +96,7 @@ class OAuthClient(Base):
     client_secret_hash: Mapped[str] = mapped_column(String, nullable=False)
     redirect_uris: Mapped[str] = mapped_column(Text, nullable=False)  # JSON serializado
     app_name: Mapped[str] = mapped_column(String, nullable=False)
+    liveness_policy: Mapped[str] = mapped_column(String, default="active")  # 'none', 'passive', 'active'
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -125,6 +126,7 @@ class IoTDevice(Base):
     lbp_threshold: Mapped[float] = mapped_column(Float, default=3.2)
     # URL del stream RTSP o HTTP para cámaras de vigilancia
     stream_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    antispoofing_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # True: LBP activo; False: Bypass ultra-rápido (<200ms)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -178,8 +180,24 @@ def init_sqlite():
                 db.add(new_admin)
                 db.commit()
                 logger.info(f"🔑 Administrador inicial creado exitosamente -> Usuario: '{default_username}' | Contraseña: '{default_password}'")
+
+            # Auto-migración de columnas para bases de datos existentes
+            from sqlalchemy import text
+            # 1. Verificar columna antispoofing_enabled en iot_devices
+            cols_iot = [row[1] for row in db.execute(text("PRAGMA table_info(iot_devices)")).fetchall()]
+            if cols_iot and "antispoofing_enabled" not in cols_iot:
+                db.execute(text("ALTER TABLE iot_devices ADD COLUMN antispoofing_enabled BOOLEAN DEFAULT 1;"))
+                db.commit()
+                logger.info("🛠️ Columna 'antispoofing_enabled' migrada en iot_devices.")
+
+            # 2. Verificar columna liveness_policy en oauth_clients
+            cols_oauth = [row[1] for row in db.execute(text("PRAGMA table_info(oauth_clients)")).fetchall()]
+            if cols_oauth and "liveness_policy" not in cols_oauth:
+                db.execute(text("ALTER TABLE oauth_clients ADD COLUMN liveness_policy VARCHAR DEFAULT 'active';"))
+                db.commit()
+                logger.info("🛠️ Columna 'liveness_policy' migrada en oauth_clients.")
     except Exception as e:
-        logger.error(f"Error al verificar/sembrar administrador inicial: {e}")
+        logger.error(f"Error al verificar/sembrar administrador inicial o migrar columnas: {e}")
 
 
 # =========================================================================
@@ -193,7 +211,8 @@ def save_oauth_client(
     app_name: str,
     developer_user_id: str,
     developer_username: str,
-    developer_password_hash: str
+    developer_password_hash: str,
+    liveness_policy: str = "active"
 ) -> bool:
     """
     Guarda un nuevo cliente de OAuth en la base de datos relacional
@@ -207,7 +226,8 @@ def save_oauth_client(
                 client_id=client_id,
                 client_secret_hash=client_secret_hash,
                 redirect_uris=redirect_uris_json,
-                app_name=app_name
+                app_name=app_name,
+                liveness_policy=liveness_policy
             )
             session.add(client)
             
@@ -232,7 +252,7 @@ def save_oauth_client(
                 session.add(user)
             
             session.commit()
-            logger.info(f"🔑 Cliente OAuth '{app_name}' (ID: {client_id}) y desarrollador '{developer_username}' guardados con éxito.")
+            logger.info(f"🔑 Cliente OAuth '{app_name}' (ID: {client_id}, Política: {liveness_policy}) y desarrollador '{developer_username}' guardados con éxito.")
             return True
         except Exception as e:
             session.rollback()
@@ -256,9 +276,32 @@ def get_oauth_client(client_id: str) -> Optional[dict]:
                 "client_id": client.client_id,
                 "client_secret_hash": client.client_secret_hash,
                 "redirect_uris": uris,
-                "app_name": client.app_name
+                "app_name": client.app_name,
+                "liveness_policy": getattr(client, "liveness_policy", "active") or "active"
             }
         return None
+
+
+def update_oauth_client(client_id: str, app_name: Optional[str] = None, redirect_uris: Optional[list[str]] = None, liveness_policy: Optional[str] = None) -> bool:
+    """Actualiza la configuración o política de liveness de un cliente OAuth."""
+    with SessionLocal() as session:
+        client = session.get(OAuthClient, client_id)
+        if not client:
+            return False
+        try:
+            if app_name is not None:
+                client.app_name = app_name
+            if redirect_uris is not None:
+                client.redirect_uris = json.dumps(redirect_uris)
+            if liveness_policy is not None:
+                client.liveness_policy = liveness_policy
+            session.commit()
+            logger.info(f"🔄 Cliente OAuth '{client_id}' actualizado (Política: {client.liveness_policy}).")
+            return True
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error al actualizar cliente OAuth: {e}")
+            return False
 
 
 def get_all_oauth_clients() -> list[dict]:
@@ -279,6 +322,7 @@ def get_all_oauth_clients() -> list[dict]:
                 "client_id": client.client_id,
                 "app_name": client.app_name,
                 "redirect_uris": uris,
+                "liveness_policy": getattr(client, "liveness_policy", "active") or "active",
                 "created_at": client.created_at
             })
         return result

@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 #              UTILIDADES DE CONVERSIÓN
 # =========================================================================
 
+import io
+from PIL import Image, ImageOps
+
 def base64_to_image(base64_string: str):
-    """Convierte la imagen en texto (Base64) que envía el Frontend a un formato de matriz NumPy para OpenCV."""
+    """Convierte la imagen en texto (Base64) a formato BGR para OpenCV, respetando la orientación EXIF de teléfonos."""
     if "," in base64_string:
         base64_string = base64_string.split(",")[1]
         
@@ -35,16 +38,24 @@ def base64_to_image(base64_string: str):
     except Exception as e:
         raise ValueError(f"No se pudo decodificar Base64: {e}")
 
-    nparr = np.frombuffer(img_data, np.uint8)
-    if nparr.size == 0:
+    if not img_data:
         raise ValueError("El buffer de imagen está vacío")
-        
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    if img is None:
-        raise ValueError("No se pudo decodificar la imagen Base64")
-
-    return img
+    # Intentar primero con PIL para corregir automáticamente la orientación EXIF de fotos móviles (iPhone / Android)
+    try:
+        pil_img = Image.open(io.BytesIO(img_data))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+        img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        return img
+    except Exception:
+        # Fallback a cv2.imdecode estándar
+        nparr = np.frombuffer(img_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("No se pudo decodificar la imagen Base64")
+        return img
 
 
 # =========================================================================
@@ -106,7 +117,7 @@ def register_face(user_id: str, name: str, role: str, base64_image: str):
 #              FLUJO DE AUTENTICACIÓN (MATCHING)
 # =========================================================================
 
-def verify_face(image_data):
+def verify_face(image_data, custom_threshold: float = None):
     """Convierte la foto de la cámara (o usa el numpy array directamente) en vector y busca el más parecido en la DB."""
     logger.info("🔍 Iniciando verificación facial...")
     t0_verify = time.perf_counter()
@@ -173,9 +184,10 @@ def verify_face(image_data):
     distance = results['distances'][0][0]
     matched_id = results['ids'][0][0]
 
-    logger.info(f"Candidato encontrado: {matched_id} | Distancia: {distance:.4f} | Umbral: {settings.FACE_MATCH_THRESHOLD}")
+    eff_threshold = custom_threshold if custom_threshold is not None else settings.FACE_MATCH_THRESHOLD
+    logger.info(f"Candidato encontrado: {matched_id} | Distancia: {distance:.4f} | Umbral: {eff_threshold}")
 
-    if distance < settings.FACE_MATCH_THRESHOLD:
+    if distance < eff_threshold:
         user_info = get_user_by_id(matched_id)
         if not user_info and "_" in matched_id:
             base_id = matched_id.split("_")[0]

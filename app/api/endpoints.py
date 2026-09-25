@@ -218,6 +218,35 @@ def enroll_my_biometrics(bio_data: BiometricsEnrollRequest, current_user: dict =
     return {"success": True, "message": "Biometría facial enrolada con éxito."}
 
 
+@router.put("/users/{user_id}/biometrics", tags=["Autenticación y Registro"])
+def admin_enroll_user_biometrics(
+    user_id: str,
+    bio_data: BiometricsEnrollRequest,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Permite al Administrador actualizar o enrolar nuevamente la biometría facial de cualquier usuario en ChromaDB y SQLite.
+    """
+    user_info = get_user_by_id(user_id)
+    if not user_info:
+        auth_info = get_user_auth_info_by_id(user_id)
+        if not auth_info:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        user_info = {"name": auth_info["name"], "role": auth_info["role"]}
+
+    success, message = register_face(
+        user_id=user_id,
+        name=user_info["name"],
+        role=user_info["role"],
+        base64_image=bio_data.image_base64
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"success": True, "message": f"Biometría facial de {user_info['name']} actualizada con éxito."}
+
+
 @router.get("/clients/my", tags=["IdP OAuth / SSO"])
 def get_my_client_app(current_user: dict = Depends(get_current_user)):
     """
@@ -371,7 +400,15 @@ def blockchain_status():
 
 import json
 import cv2
-from app.services.liveness import BlinkTracker, analyze_blink, analyze_texture, analyze_frequency, comprehensive_liveness_check
+import random
+from app.services.liveness import (
+    BlinkTracker, 
+    analyze_blink, 
+    analyze_texture, 
+    analyze_frequency, 
+    comprehensive_liveness_check,
+    estimate_head_pose
+)
 
 @router.websocket("/ws/liveness")
 async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None), action: str = Query("authentication")):
@@ -386,6 +423,19 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
     # Tolerancia: ear_threshold=0.16 para asegurar que el usuario cerró intencionalmente 
     # los ojos, y no un falso positivo por párpados naturalmente caídos o inicialización.
     tracker = BlinkTracker(ear_threshold=0.16, consecutive_frames=1)
+    
+    # Máquina de estados para Liveness Blindado (Challenge-Response Secuencial):
+    # Fase 1: "blink" (Detección de parpadeo frontal + validación LBP >= 3.20 + captura frontal_frame)
+    # Fase 2 & 3: "challenge" (Secuencia de 2 retos aleatorios distintos: "left", "right", "mouth")
+    # Regla Crítica: Penalización por gesto opuesto/incorrecto para anular ataques de repetición
+    phase = "blink"
+    challenges = []  # Lista de 2 retos distintos, ej: ["left", "mouth"]
+    challenge_step = 0  # 0 para Reto 1/2, 1 para Reto 2/2
+    challenge_start_time = None
+    frontal_frame = None
+    saved_texture_res = None
+    saved_freq_res = None
+    saved_ear = 0.0
     
     try:
         frame_count = 0
@@ -424,120 +474,297 @@ async def websocket_liveness(websocket: WebSocket, client_id: str = Query(None),
                     })
                     continue
                 
-                # Actualizar el rastreador de parpadeo con el EAR actual
-                is_blinking = tracker.update(ear)
-                
-                if is_blinking:
-                    # ¡Parpadeo detectado! Ahora verificamos si es una pantalla/impresión
-                    texture_res = analyze_texture(img_bgr)
-                    freq_res = analyze_frequency(img_bgr)
+                if phase == "blink":
+                    # Actualizar el rastreador de parpadeo con el EAR actual
+                    is_blinking = tracker.update(ear)
                     
+                    if is_blinking:
+                        # ¡Parpadeo detectado! Verificación LBP con umbral base SSO en 3.20
+                        sso_lbp_threshold = 3.20
+                        texture_res = analyze_texture(img_bgr, custom_lbp_threshold=sso_lbp_threshold, adaptive_threshold=False)
+                        freq_res = analyze_frequency(img_bgr)
+                        
+                        print(f"🔬 Fase 1 (Parpadeo) -> LBP: {texture_res.get('entropy')} | Umbral: {texture_res.get('lbp_threshold')}")
+                        
+                        if not texture_res.get("is_real"):
+                            print(f"🚨 Spoofing detectado en blink (Foto/Impresión). Texture: {texture_res.get('texture_score')}")
+                            tracker.reset()
+                            await websocket.send_json({
+                                "status": "spoof_detected",
+                                "message": "Ataque detectado (Pantalla/Foto). Usa un rostro real.",
+                                "metrics": {
+                                    "blink": {"value": round(ear, 3), "threshold": "< 0.16", "weight": "Filtro Base (Obligatorio)", "passed": True},
+                                    "texture": {"value": texture_res.get("entropy"), "threshold": f">= {sso_lbp_threshold:.2f}", "weight": "Determinante (Alto)", "passed": False},
+                                    "frequency": {"value": freq_res.get("freq_ratio"), "threshold": "N/A", "weight": "Bypass (OLED)"}
+                                }
+                            })
+                            continue
+                        
+                        # ¡Fase 1 superada! Guardamos el fotograma FRONTAL limpio para ArcFace
+                        frontal_frame = img_bgr.copy()
+                        saved_texture_res = texture_res
+                        saved_freq_res = freq_res
+                        saved_ear = ear
+                        
+                        # Iniciar Secuencia de 2 Retos Dinámicos DISTINTOS aleatorios:
+                        challenges = random.sample(["left", "right", "mouth"], 2)
+                        challenge_step = 0
+                        phase = "challenge"
+                        challenge_start_time = time.time()
+                        
+                        curr_c = challenges[0]
+                        if curr_c == "left":
+                            c_text = "Gira hacia tu hombro IZQUIERDO"
+                        elif curr_c == "right":
+                            c_text = "Gira hacia tu hombro DERECHO"
+                        else:
+                            c_text = "Abre ligeramente la boca 😮"
+                            
+                        print(f"🎯 Secuencia de retos asignada: {challenges}. Iniciando Reto 1/2: {curr_c.upper()}")
+                        
+                        await websocket.send_json({
+                            "status": "tracking",
+                            "challenge": curr_c,
+                            "step": 1,
+                            "message": f"¡Parpadeo detectado! Reto 1/2: {c_text}",
+                            "ear": round(ear, 3),
+                            "metrics": {
+                                "blink": {"value": round(ear, 3), "threshold": "< 0.16", "weight": "Filtro Base", "passed": True},
+                                "texture": {"value": texture_res.get("entropy"), "threshold": f">= {sso_lbp_threshold:.2f}", "weight": "Determinante", "passed": True},
+                                "pose": {"value": 0.0, "threshold": f"Reto 1/2: {curr_c.upper()}", "weight": "Anti-Replay Dinámico", "passed": False},
+                                "frequency": {"value": freq_res.get("freq_ratio"), "threshold": "N/A", "weight": "Bypass (OLED)"}
+                            }
+                        })
+                    else:
+                        await websocket.send_json({
+                            "status": "tracking", 
+                            "ear": round(ear, 3),
+                            "message": "Mirando a la cámara... Por favor, parpadea."
+                        })
+                
+                elif phase == "challenge":
+                    # Límite de tiempo para el reto actual (7.0 segundos por paso)
+                    elapsed_step = time.time() - challenge_start_time
+                    if elapsed_step > 7.0:
+                        print(f"⏱️ Tiempo agotado para el reto {challenge_step + 1}/2. Reiniciando a parpadeo.")
+                        phase = "blink"
+                        tracker.reset()
+                        frontal_frame = None
+                        challenges = []
+                        challenge_step = 0
+                        await websocket.send_json({
+                            "status": "tracking",
+                            "message": "Tiempo agotado. Mira al frente y parpadea para reintentar."
+                        })
+                        continue
+                    
+                    # Estimar pose de cabeza y apertura de boca
+                    pose = estimate_head_pose(img_rgb)
+                    if not pose.get("detected"):
+                        await websocket.send_json({
+                            "status": "no_face",
+                            "message": "Rostro no detectado. Mira de frente a la cámara."
+                        })
+                        continue
+                        
+                    yaw = pose.get("yaw", 0.0)
+                    mar = pose.get("mar", 0.0)
+                    curr_c = challenges[challenge_step]
+                    
+                    # REGLA CRÍTICA ANTI-VIDEO (Penalización por gesto opuesto / incorrecto):
+                    # Se concede un margen de 0.8s al iniciar el paso para permitir la transición física del rostro.
+                    # Si tras 0.8s el usuario/video ejecuta el giro opuesto (>= 6.0°), se reinicia el flujo
+                    # a la Fase 1 (parpadeo) para bloquear videos en bucle sin tumbar la cámara ni el WebSocket.
+                    wrong_gesture = False
+                    if elapsed_step > 0.8:
+                        if curr_c == "left" and yaw <= -6.0:
+                            wrong_gesture = True
+                        elif curr_c == "right" and yaw >= 6.0:
+                            wrong_gesture = True
+                        elif curr_c == "mouth" and abs(yaw) >= 6.5:
+                            wrong_gesture = True
+                            
+                    if wrong_gesture:
+                        print(f"⚠️ Gesto opuesto detectado mientras se esperaba {curr_c.upper()} (Yaw: {yaw}, MAR: {mar}). Reiniciando reto de liveness.")
+                        phase = "blink"
+                        tracker.reset()
+                        frontal_frame = None
+                        challenges = []
+                        challenge_step = 0
+                        await websocket.send_json({
+                            "status": "tracking",
+                            "message": "Gesto en dirección contraria. Vuelve a mirar al frente y parpadea."
+                        })
+                        continue
+                    
+                    # Evaluar si el reto actual fue superado:
+                    # 1. "left": yaw >= +5.5°
+                    # 2. "right": yaw <= -5.5°
+                    # 3. "mouth": mar >= 0.25
+                    is_step_met = False
+                    if curr_c == "left" and yaw >= 5.5:
+                        is_step_met = True
+                    elif curr_c == "right" and yaw <= -5.5:
+                        is_step_met = True
+                    elif curr_c == "mouth" and mar >= 0.25:
+                        is_step_met = True
+                        
+                    if not is_step_met:
+                        # Enviar retroalimentación en tiempo real
+                        if curr_c == "left":
+                            desc = f"Reto {challenge_step + 1}/2: Gira hacia tu hombro IZQUIERDO (Giro: {max(0.0, yaw):.1f}° / 5.5°)"
+                            val_display = round(yaw, 1)
+                        elif curr_c == "right":
+                            desc = f"Reto {challenge_step + 1}/2: Gira hacia tu hombro DERECHO (Giro: {max(0.0, -yaw):.1f}° / 5.5°)"
+                            val_display = round(yaw, 1)
+                        else:
+                            desc = f"Reto {challenge_step + 1}/2: Abre ligeramente la boca 😮 (Apertura: {mar:.2f} / 0.25)"
+                            val_display = round(mar, 2)
+                            
+                        await websocket.send_json({
+                            "status": "tracking",
+                            "challenge": curr_c,
+                            "step": challenge_step + 1,
+                            "yaw": round(yaw, 1),
+                            "mar": round(mar, 2),
+                            "message": desc,
+                            "metrics": {
+                                "blink": {"value": round(saved_ear, 3), "threshold": "< 0.16", "weight": "Filtro Base", "passed": True},
+                                "texture": {"value": saved_texture_res.get("entropy"), "threshold": f">= {sso_lbp_threshold:.2f}", "weight": "Determinante", "passed": True},
+                                "pose": {"value": val_display, "threshold": f"Reto {challenge_step+1}/2: {curr_c.upper()}", "weight": "Anti-Replay Dinámico", "passed": False},
+                                "frequency": {"value": saved_freq_res.get("freq_ratio"), "threshold": "N/A", "weight": "Bypass (OLED)"}
+                            }
+                        })
+                        continue
+                        
+                    # ¡Paso completado!
+                    if challenge_step == 0:
+                        challenge_step = 1
+                        challenge_start_time = time.time()
+                        next_c = challenges[1]
+                        print(f"✅ Reto 1/2 superado ({curr_c.upper()}). Iniciando Reto 2/2: {next_c.upper()}")
+                        
+                        if next_c == "left":
+                            next_desc = "¡Reto 1 superado! Reto 2/2: Ahora gira hacia tu hombro IZQUIERDO"
+                        elif next_c == "right":
+                            next_desc = "¡Reto 1 superado! Reto 2/2: Ahora gira hacia tu hombro DERECHO"
+                        else:
+                            next_desc = "¡Reto 1 superado! Reto 2/2: Ahora abre ligeramente la boca 😮"
+                            
+                        await websocket.send_json({
+                            "status": "tracking",
+                            "challenge": next_c,
+                            "step": 2,
+                            "message": next_desc,
+                            "metrics": {
+                                "blink": {"value": round(saved_ear, 3), "threshold": "< 0.16", "weight": "Filtro Base", "passed": True},
+                                "texture": {"value": saved_texture_res.get("entropy"), "threshold": f">= {sso_lbp_threshold:.2f}", "weight": "Determinante", "passed": True},
+                                "pose": {"value": 0.0, "threshold": f"Reto 2/2: {next_c.upper()}", "weight": "Anti-Replay Dinámico", "passed": False},
+                                "frequency": {"value": saved_freq_res.get("freq_ratio"), "threshold": "N/A", "weight": "Bypass (OLED)"}
+                            }
+                        })
+                        continue
+                        
+                    # ¡AMBOS RETOS SUPERADOS!
+                    print(f"🎉 ¡Desafío Activo Completo Superado! Secuencia: {[c.upper() for c in challenges]}")
+                    
+                    sso_lbp_threshold = 3.20
                     metrics_payload = {
                         "blink": {
-                            "value": round(ear, 3),
+                            "value": round(saved_ear, 3),
                             "threshold": "< 0.16",
-                            "weight": "Filtro Base (Obligatorio)"
+                            "weight": "Filtro Base (Obligatorio)",
+                            "passed": True
                         },
                         "texture": {
-                            "value": texture_res.get("entropy"),
-                            "threshold": ">= 4.75",
-                            "weight": "Determinante (Alto)"
+                            "value": saved_texture_res.get("entropy"),
+                            "threshold": f">= {sso_lbp_threshold:.2f}",
+                            "weight": "Determinante (Alto)",
+                            "passed": True
+                        },
+                        "pose": {
+                            "value": f"{challenges[0].upper()} + {challenges[1].upper()}",
+                            "threshold": "Secuencia 2/2 OK",
+                            "weight": "Anti-Replay Dinámico",
+                            "passed": True
                         },
                         "frequency": {
-                            "value": freq_res.get("freq_ratio"),
+                            "value": saved_freq_res.get("freq_ratio"),
                             "threshold": "N/A",
                             "weight": "Bypass (Deshabilitado para OLED)"
                         }
                     }
- 
-                    if texture_res.get("is_real") and freq_res.get("is_real"):
-                        print(f"✅ Blink real. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
+                    
+                    # Ejecutar ArcFace usando el frontal_frame limpio guardado en Fase 1
+                    print("🧠 Ejecutando ArcFace con el fotograma FRONTAL limpio guardado en Fase 1...")
+                    auth_res = verify_face(frontal_frame, custom_threshold=0.70)
+                    
+                    if auth_res.get("success"):
+                        user_id = auth_res["user_id"]
+                        user_name = auth_res["name"]
+                        role = auth_res["role"]
+                        distance = auth_res["distance"]
                         
-                        # Ejecutar la verificación de identidad biométrica con ArcFace
-                        auth_res = verify_face(img_bgr)
+                        effective_client_id = client_id or "LOCAL_AUTH"
+                        token = generate_idp_token(
+                            user_id=user_id,
+                            client_id=effective_client_id,
+                            role=role,
+                            action=action,
+                            name=user_name
+                        )
                         
-                        if auth_res.get("success"):
-                            user_id = auth_res["user_id"]
-                            user_name = auth_res["name"]
-                            role = auth_res["role"]
-                            distance = auth_res["distance"]
-                            
-                            effective_client_id = client_id or "LOCAL_AUTH"
-                            token = generate_idp_token(
+                        # Registrar en blockchain de forma no bloqueante
+                        loop = asyncio.get_event_loop()
+                        log_res = await loop.run_in_executor(
+                            None,
+                            lambda: log_authentication(
                                 user_id=user_id,
                                 client_id=effective_client_id,
-                                role=role,
-                                action=action,
-                                name=user_name
+                                embedding=None,
+                                access_granted=True,
+                                match_score=distance
                             )
-                            
-                            # Registrar en blockchain de forma no bloqueante
-                            loop = asyncio.get_event_loop()
-                            log_res = await loop.run_in_executor(
-                                None,
-                                lambda: log_authentication(
-                                    user_id=user_id,
-                                    client_id=effective_client_id,
-                                    embedding=None,
-                                    access_granted=True,
-                                    match_score=distance
-                                )
-                            )
-                            tx_hash = log_res.get("tx_hash")
-                            
-                            await websocket.send_json({
-                                "status": "passed",
-                                "message": f"¡Identidad verificada! Bienvenido, {user_name}",
-                                "user_id": user_id,
-                                "user_name": user_name,
-                                "role": role,
-                                "token": token,
-                                "match_score": distance,
-                                "tx_hash": tx_hash,
-                                "metrics": metrics_payload
-                            })
-                        else:
-                            # Falla de autenticación: Rostro no reconocido o no coincide
-                            distance = auth_res.get("distance", 0.0)
-                            effective_client_id = client_id or "LOCAL_AUTH"
-                            
-                            # Registrar fallo en blockchain de forma no bloqueante
-                            loop = asyncio.get_event_loop()
-                            await loop.run_in_executor(
-                                None,
-                                lambda: log_authentication(
-                                    user_id="UNKNOWN",
-                                    client_id=effective_client_id,
-                                    embedding=None,
-                                    access_granted=False,
-                                    match_score=distance
-                                )
-                            )
-                            
-                            await websocket.send_json({
-                                "status": "failed",
-                                "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
-                                "match_score": distance,
-                                "metrics": metrics_payload
-                            })
-                        # Romper el ciclo ya que el flujo termina (éxito o fallo biométrico)
-                        break
-                    else:
-                        print(f"🚨 Spoofing detectado en blink. Texture: {texture_res.get('texture_score')} | Freq: {freq_res.get('frequency_score')}")
-                        # Detectamos pantalla o impresión (Spoofing)
-                        # Reiniciamos el rastreador para que intente de nuevo
-                        tracker.reset()
+                        )
+                        tx_hash = log_res.get("tx_hash")
+                        
                         await websocket.send_json({
-                            "status": "spoof_detected", 
-                            "message": "Ataque detectado (Pantalla/Foto). Usa un rostro real.",
+                            "status": "passed",
+                            "message": f"¡Identidad verificada! Bienvenido, {user_name}",
+                            "user_id": user_id,
+                            "user_name": user_name,
+                            "role": role,
+                            "token": token,
+                            "match_score": distance,
+                            "tx_hash": tx_hash,
                             "metrics": metrics_payload
                         })
-                else:
-                    await websocket.send_json({
-                        "status": "tracking", 
-                        "ear": round(ear, 3),
-                        "message": "Mirando a la cámara... Por favor, parpadea."
-                    })
+                    else:
+                        # Falla de autenticación: Rostro no reconocido o no coincide
+                        distance = auth_res.get("distance", 0.0)
+                        effective_client_id = client_id or "LOCAL_AUTH"
+                        
+                        # Registrar fallo en blockchain de forma no bloqueante
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            lambda: log_authentication(
+                                user_id="UNKNOWN",
+                                client_id=effective_client_id,
+                                embedding=None,
+                                access_granted=False,
+                                match_score=distance
+                            )
+                        )
+                        
+                        await websocket.send_json({
+                            "status": "failed",
+                            "message": auth_res.get("message", "Acceso denegado. Rostro desconocido."),
+                            "match_score": distance,
+                            "metrics": metrics_payload
+                        })
+                    # Romper el ciclo ya que el flujo termina (éxito o fallo biométrico)
+                    break
                     
             except ValueError as e:
                 print(f"Error decodificando imagen en WebSocket: {e}")
@@ -989,6 +1216,57 @@ def register_device(device_data: IoTDeviceCreate, current_user: dict = Depends(r
     }
 
 
+@router.get("/devices/sync", tags=["Acceso Físico"])
+def sync_devices_for_gateway():
+    """
+    Endpoint de aprovisionamiento Zero-Config para dispositivos de borde (Edge Gateways / Raspberry Pi).
+    Permite que cualquier hardware de borde consulte la configuración activa sin requerir edición manual de archivos.
+    """
+    devices = get_all_devices()
+    KNOWN_TOKENS = {
+        "PASILLO62": "hw_zaEy9rg43tK6QZa0e9O_oDE_spala6yRm71hA74ayV8",
+        "TLFHECTOR": "hw_tlfhector_secret_key_8832a74ayV8",
+        "IPHONE6": "hw_iphone6_token"
+    }
+
+    existing_tokens = {}
+    for path in ["data/cameras.json", "cameras.json", "/app/data/cameras.json"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    configs = json.load(f)
+                for c in configs:
+                    if "device_id" in c and "token" in c:
+                        existing_tokens[c["device_id"].upper()] = c["token"]
+            except Exception:
+                pass
+
+    result = []
+    for d in devices:
+        dev_id = d["device_id"].upper()
+        token = existing_tokens.get(dev_id) or KNOWN_TOKENS.get(dev_id) or f"hw_{dev_id.lower()}_token"
+        result.append({
+            "device_id": d["device_id"],
+            "name": d["device_name"],
+            "token": token,
+            "source": d["stream_url"] if d.get("stream_url") else "0",
+            "location": d.get("location") or "Punto de Acceso",
+            "enabled": bool(d.get("is_active", True) and d.get("stream_url")),
+            "lbp_threshold": d.get("lbp_threshold", 3.670)
+        })
+
+    # Guardar automáticamente en disco para sincronización física instantánea
+    for path in ["/app/data/cameras.json", "data/cameras.json"]:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=4)
+        except Exception as e:
+            logger.warning(f"No se pudo guardar automáticamente {path}: {e}")
+
+    return result
+
+
 @router.get("/devices/{device_id}", tags=["Acceso Físico"])
 def get_single_device(device_id: str, current_user: dict = Depends(require_admin)):
     """Obtiene los detalles de configuración y calibración de un dispositivo."""
@@ -1018,6 +1296,42 @@ def update_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dispositivo '{device_id}' no encontrado o no se pudo actualizar."
         )
+
+    # Sincronizar data/cameras.json y cameras.json si existen
+    for path in ["data/cameras.json", "cameras.json", "/app/data/cameras.json"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    configs = json.load(f)
+                matched = False
+                for c in configs:
+                    if c.get("device_id", "").upper() == device_id.upper():
+                        matched = True
+                        if update_data.is_active is not None:
+                            c["enabled"] = update_data.is_active
+                        if update_data.stream_url is not None:
+                            c["source"] = update_data.stream_url
+                        if update_data.lbp_threshold is not None:
+                            c["lbp_threshold"] = update_data.lbp_threshold
+                        if update_data.device_name is not None:
+                            c["name"] = update_data.device_name
+                        if update_data.location is not None:
+                            c["location"] = update_data.location
+                if not matched and update_data.stream_url:
+                    configs.append({
+                        "device_id": device_id,
+                        "name": update_data.device_name or device_id,
+                        "token": f"hw_{device_id.lower()}_token_aqui",
+                        "source": update_data.stream_url or "0",
+                        "location": update_data.location or "Punto de Acceso",
+                        "enabled": bool(update_data.is_active) if update_data.is_active is not None else True,
+                        "lbp_threshold": update_data.lbp_threshold or 3.670
+                    })
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=4)
+            except Exception:
+                pass
+
     return {"success": True, "message": f"Dispositivo '{device_id}' actualizado correctamente."}
 
 
