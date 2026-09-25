@@ -46,7 +46,7 @@ FRAME_WIDTH     = 480     # Resolución reducida → <65% CPU en RPi 4
 FRAME_HEIGHT    = 360
 COOLDOWN_TIME   = 4.0     # Segundos de espera post-envío (anti-spam)
 STATUS_DURATION = 3.5     # Cuánto tiempo se mantiene el resultado en pantalla
-MARGIN_PCT      = 0.15    # Margen alrededor del rostro para el recorte final
+MARGIN_PCT      = 0.45    # Margen alrededor del rostro (45% para dar contexto anatómico al detector facial)
 
 # -- Parámetros de la máquina de estados EAR --
 EAR_THRESHOLD   = float(os.environ.get("FACESENTINEL_EAR_THRESHOLD", "0.24"))  # Ratio de cierre (configurable)

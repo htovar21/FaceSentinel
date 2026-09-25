@@ -60,7 +60,7 @@ def eye_aspect_ratio(landmarks, eye_indices, img_w, img_h) -> float:
     C = np.linalg.norm(pts[0] - pts[3])
     return float((A + B) / (2.0 * C)) if C > 0 else 0.0
 
-def crop_face(frame_bgr, face_landmarks, margin_pct: float = 0.35):
+def crop_face(frame_bgr, face_landmarks, margin_pct: float = 0.45):
     h, w = frame_bgr.shape[:2]
     xs = [lm.x * w for lm in face_landmarks.landmark]
     ys = [lm.y * h for lm in face_landmarks.landmark]

@@ -59,14 +59,18 @@ def get_embedding(img_array):
             representations = DeepFace.represent(
                 img_path=img_array,
                 model_name=settings.AI_MODEL_NAME,
+                detector_backend="mediapipe",
+                align=True,
                 enforce_detection=True
             )
         except ValueError:
-            # Si el detector OpenCV no detecta el rostro (común en recortes tight o cámaras con ángulo),
-            # procesamos directamente el recorte centrado sin forzar re-detección
+            # Si mediapipe no detecta el rostro con detección forzada,
+            # procesamos el recorte centrado asegurando align=True
             representations = DeepFace.represent(
                 img_path=img_array,
                 model_name=settings.AI_MODEL_NAME,
+                detector_backend="mediapipe",
+                align=True,
                 enforce_detection=False
             )
         embedding = representations[0]["embedding"]

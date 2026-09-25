@@ -148,18 +148,26 @@ def analyze_texture(frame_bgr, custom_lbp_threshold: float = 3.2) -> dict:
     try:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
 
-        # Detectar el rostro para analizar solo esa región
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        # Detectar el rostro con MediaPipe Face Mesh para aislar el ROI facial
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        mesh_results = face_mesh.process(rgb)
 
-        if len(faces) > 0:
-            x, y, w, h = faces[0]
-            face_roi = gray[y:y+h, x:x+w]
+        if mesh_results.multi_face_landmarks:
+            h, w = gray.shape[:2]
+            lms = mesh_results.multi_face_landmarks[0].landmark
+            xs = [lm.x * w for lm in lms]
+            ys = [lm.y * h for lm in lms]
+            x1 = max(0, int(min(xs)))
+            y1 = max(0, int(min(ys)))
+            x2 = min(w, int(max(xs)))
+            y2 = min(h, int(max(ys)))
+            if (x2 - x1) >= 32 and (y2 - y1) >= 32:
+                face_roi = gray[y1:y2, x1:x2]
+            else:
+                face_roi = gray
         else:
-            # Fallback robusto: si la imagen ya viene recortada del borde (MediaPipe Face Mesh)
-            # o el clasificador Haar falla por ligera inclinación/luz, analizamos la región central
+            # Fallback robusto: si la imagen ya viene recortada del borde o MediaPipe no converge,
+            # analizamos la región facial central
             h, w = gray.shape[:2]
             if h >= 32 and w >= 32:
                 face_roi = gray[int(h * 0.1):int(h * 0.9), int(w * 0.1):int(w * 0.9)]
