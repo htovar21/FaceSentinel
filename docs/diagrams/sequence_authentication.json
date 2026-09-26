@@ -2,24 +2,24 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "FaceSentinel — Secuencia de Autenticación (Web SSO y Hardware Físico)",
+    "title": "FaceSentinel — Secuencia de Autenticación (Web SSO y Acceso Ciberfísico)",
     "output": "docs/diagrams/sequence_authentication.html",
     "quality_profile": "showcase",
-    "viewBox": [1040, 595],
+    "viewBox": [1040, 610],
     "column_fit": "spread",
     "animation": "trace",
     "views": [
       {
         "id": "web-sso-view",
         "label": "Flujo Web SSO (Liveness Activo)",
-        "focus": ["browser", "api", "engine", "blockchain"],
-        "note": "Autenticación interactiva de usuario mediante reto-respuesta y emisión de JWT."
+        "focus": ["client_app", "browser", "api", "engine"],
+        "note": "Autenticación interactiva iniciada por App Cliente (UNEGIA) mediante reto-respuesta y emisión de JWT."
       },
       {
         "id": "hardware-edge-view",
-        "label": "Flujo Hardware Físico (Edge Gateway)",
+        "label": "Flujo Ciberfísico Periférico (Edge Gateway)",
         "focus": ["user", "edge", "api", "db", "engine"],
-        "note": "Acceso M2M autónomo con validación ACL, LBP y accionamiento de relé."
+        "note": "Acceso M2M autónomo con validación ACL, LBP y señalización lógica estructurada de acceso."
       },
       {
         "id": "blockchain-audit-view",
@@ -35,6 +35,12 @@
       "type": "external",
       "label": "Usuario",
       "sublabel": "Sujeto / Rostro"
+    },
+    {
+      "id": "client_app",
+      "type": "frontend",
+      "label": "App Cliente",
+      "sublabel": "UNEGIA Portal"
     },
     {
       "id": "browser",
@@ -76,162 +82,184 @@
   "segments": [
     {
       "from": 145,
-      "to": 315,
+      "to": 368,
       "label": "Flujo 1: Web SSO (Liveness Activo Interactivo & JWT)"
     },
     {
-      "from": 325,
-      "to": 520,
-      "label": "Flujo 2: Acceso Físico Hardware (Edge M2M, LBP & Relé)"
+      "from": 372,
+      "to": 544,
+      "label": "Flujo 2: Acceso Ciberfísico Periférico (Edge M2M, LBP & Señalización Lógica)"
     }
   ],
   "messages": [
     {
+      "id": "msg-client-redirect",
+      "from": "client_app",
+      "to": "browser",
+      "y": 160,
+      "label": "1. Redirección a FaceSentinel SSO",
+      "variant": "default"
+    },
+    {
       "id": "msg-ws-connect",
       "from": "browser",
       "to": "api",
-      "y": 160,
-      "label": "1. WS Connect /ws/liveness",
+      "y": 188,
+      "label": "2. WS Connect /ws/liveness",
       "variant": "emphasis"
     },
     {
       "id": "msg-challenge",
       "from": "api",
       "to": "browser",
-      "y": 188,
-      "label": "2. Reto interactivo (Blink + Yaw/MAR)",
+      "y": 216,
+      "label": "3. Reto interactivo (Blink + Yaw/MAR)",
       "variant": "security"
     },
     {
       "id": "msg-stream-b64",
       "from": "browser",
       "to": "api",
-      "y": 216,
-      "label": "3. Stream frames Base64",
+      "y": 244,
+      "label": "4. Stream frames Base64",
       "variant": "default"
     },
     {
       "id": "msg-verify-liveness",
       "from": "api",
       "to": "engine",
-      "y": 244,
-      "label": "4. Verifica Liveness Activo + ArcFace 512D",
+      "y": 272,
+      "label": "5. Verifica Liveness Activo + ArcFace 512D",
       "variant": "security"
     },
     {
       "id": "msg-match-ok",
       "from": "engine",
       "to": "api",
-      "y": 272,
-      "label": "5. Identidad confirmada en ChromaDB (score >= 0.68)",
+      "y": 300,
+      "label": "6. Identidad confirmada en ChromaDB (d_cosine < 0.68)",
       "variant": "return"
     },
     {
       "id": "msg-emit-jwt",
       "from": "api",
       "to": "browser",
-      "y": 300,
-      "label": "6. Emite JWT Session Token (200 OK)",
+      "y": 328,
+      "label": "7. Emite JWT Session Token (200 OK)",
+      "variant": "return"
+    },
+    {
+      "id": "msg-client-callback",
+      "from": "browser",
+      "to": "client_app",
+      "y": 356,
+      "label": "8. Callback con JWT / Acceso Concedido",
       "variant": "return"
     },
     {
       "id": "msg-hw-auth-req",
       "from": "edge",
       "to": "api",
-      "y": 338,
-      "label": "7. POST /physical-access/authenticate (EAR local)",
+      "y": 384,
+      "label": "9. POST /physical-access/authenticate (EAR local)",
       "variant": "emphasis"
     },
     {
       "id": "msg-hw-check-acl",
       "from": "api",
       "to": "db",
-      "y": 366,
-      "label": "8. Validar Device Token & ACL (SQLite)",
+      "y": 412,
+      "label": "10. Validar Device Token & ACL (SQLite)",
       "variant": "security"
     },
     {
       "id": "msg-hw-check-lbp",
       "from": "api",
       "to": "engine",
-      "y": 394,
-      "label": "9. Inspección textura LBP & ArcFace 512D",
+      "y": 440,
+      "label": "11. Inspección textura LBP & ArcFace 512D",
       "variant": "security"
     },
     {
       "id": "msg-hw-lbp-ok",
       "from": "engine",
       "to": "api",
-      "y": 422,
-      "label": "10. Acceso autorizado (LBP OK + Face Match)",
+      "y": 468,
+      "label": "12. Acceso autorizado (LBP OK + Face Match)",
       "variant": "return"
     },
     {
       "id": "msg-hw-grant-access",
       "from": "api",
       "to": "edge",
-      "y": 450,
-      "label": "11. 200 OK (access_granted=true, unlock=true)",
+      "y": 496,
+      "label": "13. 200 OK (access_granted=true)",
       "variant": "return"
     },
     {
-      "id": "msg-hw-open-door",
+      "id": "msg-hw-signal-m2m",
       "from": "edge",
       "to": "user",
-      "y": 478,
-      "label": "12. Pulso GPIO / Apertura física de relé",
+      "y": 524,
+      "label": "14. Señalización Lógica de Acceso (JSON Payload: access_granted=True)",
       "variant": "emphasis"
     },
     {
       "id": "msg-hw-notarize",
       "from": "api",
       "to": "blockchain",
-      "y": 506,
-      "label": "13. Notarización asíncrona logAuthentication()",
+      "y": 524,
+      "label": "15. Notarización asíncrona logAuthentication()",
       "variant": "dashed"
     }
   ],
   "activations": [
     {
+      "participant": "client_app",
+      "from": 160,
+      "to": 358,
+      "type": "frontend"
+    },
+    {
       "participant": "browser",
       "from": 160,
-      "to": 305,
+      "to": 358,
       "type": "frontend"
     },
     {
       "participant": "api",
-      "from": 160,
-      "to": 305,
+      "from": 188,
+      "to": 330,
       "type": "backend"
     },
     {
       "participant": "engine",
-      "from": 244,
-      "to": 276,
+      "from": 272,
+      "to": 302,
       "type": "security"
     },
     {
       "participant": "edge",
-      "from": 338,
-      "to": 482,
+      "from": 384,
+      "to": 526,
       "type": "frontend"
     },
     {
       "participant": "api",
-      "from": 338,
-      "to": 510,
+      "from": 384,
+      "to": 526,
       "type": "backend"
     },
     {
       "participant": "db",
-      "from": 366,
-      "to": 390,
+      "from": 412,
+      "to": 442,
       "type": "database"
     },
     {
       "participant": "engine",
-      "from": 394,
-      "to": 426,
+      "from": 440,
+      "to": 470,
       "type": "security"
     }
   ],
@@ -240,8 +268,8 @@
       "dot": "emerald",
       "title": "Arquitectura de Secuencia Dual",
       "items": [
-        "Web SSO: Reto interactivo de liveness activo vía WebSocket y emisión de JWT tras verificación ArcFace",
-        "Acceso Físico: Filtro EAR local en Edge Gateway, validación ACL, inspección LBP, apertura de relé y notarización async"
+        "Web SSO: Redirección desde App Cliente (UNEGIA), reto interactivo WebSocket y emisión de JWT tras verificación ArcFace",
+        "Acceso Físico: Filtro EAR en Edge Gateway, validación ACL/LBP, señalización lógica de acceso y notarización async"
       ]
     }
   ]
