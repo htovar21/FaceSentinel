@@ -1,0 +1,270 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "FaceSentinel — Árbol de Decisión de Políticas de Seguridad y Anti-Spoofing",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "sso_lane",
+      "label": "Canal Web SSO & Retos Activos"
+    },
+    {
+      "id": "core_lane",
+      "label": "Motor Central ArcFace & Decisión"
+    },
+    {
+      "id": "edge_lane",
+      "label": "Canal Hardware Físico (Edge Gateway)"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "sso_ingress",
+      "lane": "sso_lane",
+      "col": 0,
+      "type": "frontend",
+      "label": "React Web App",
+      "sublabel": "Browser /ws/liveness",
+      "tag": "Ingreso SSO",
+      "width": 136
+    },
+    {
+      "id": "decode_b64",
+      "lane": "sso_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "base64_to_image()",
+      "sublabel": "Decodificación OpenCV",
+      "tag": "Validación B64",
+      "width": 136
+    },
+    {
+      "id": "err_corrupt",
+      "lane": "core_lane",
+      "col": 1,
+      "type": "security",
+      "label": "Trama Corrupta",
+      "sublabel": "HTTP 422 Resiliente",
+      "tag": "Fallo B64",
+      "width": 136
+    },
+    {
+      "id": "sso_policy",
+      "lane": "sso_lane",
+      "col": 2,
+      "type": "backend",
+      "label": "liveness_policy",
+      "sublabel": "none | passive | active",
+      "tag": "Selector SSO",
+      "width": 136
+    },
+    {
+      "id": "active_liveness",
+      "lane": "sso_lane",
+      "col": 3,
+      "type": "security",
+      "label": "Reto Activo 3D",
+      "sublabel": "EAR + Pose + MAR",
+      "tag": "SSO: active",
+      "width": 136
+    },
+    {
+      "id": "sso_rejected",
+      "lane": "sso_lane",
+      "col": 4,
+      "type": "security",
+      "label": "Spoofing SSO",
+      "sublabel": "HTTP 401 Bloqueo",
+      "tag": "Fallo Liveness",
+      "width": 136
+    },
+    {
+      "id": "edge_ingress",
+      "lane": "edge_lane",
+      "col": 0,
+      "type": "frontend",
+      "label": "Edge Gateway",
+      "sublabel": "Cámara RTSP / EAR Local",
+      "tag": "Ingreso Físico",
+      "width": 136
+    },
+    {
+      "id": "edge_policy",
+      "lane": "edge_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "antispoofing_flag",
+      "sublabel": "Inspección ON / Bypass",
+      "tag": "Config Cámara",
+      "width": 136
+    },
+    {
+      "id": "lbp_passive",
+      "lane": "edge_lane",
+      "col": 2,
+      "type": "security",
+      "label": "Filtro LBP Textura",
+      "sublabel": "Evalúa lbp_threshold",
+      "tag": "Anti-Spoofing 2D",
+      "width": 136
+    },
+    {
+      "id": "edge_rejected",
+      "lane": "edge_lane",
+      "col": 3,
+      "type": "security",
+      "label": "Spoofing Físico",
+      "sublabel": "Rechazo / Alerta Local",
+      "tag": "Fallo Textura",
+      "width": 136
+    },
+    {
+      "id": "arcface_match",
+      "lane": "core_lane",
+      "col": 4,
+      "type": "backend",
+      "label": "ArcFace 512D",
+      "sublabel": "Similitud Coseno >= 0.68",
+      "tag": "ChromaDB Match",
+      "width": 136
+    },
+    {
+      "id": "access_ok",
+      "lane": "core_lane",
+      "col": 5,
+      "type": "backend",
+      "label": "Acceso Concedido",
+      "sublabel": "JWT / Relé + Audit Ganache",
+      "tag": "HTTP 200 / Apertura",
+      "width": 136
+    },
+    {
+      "id": "access_denied",
+      "lane": "sso_lane",
+      "col": 5,
+      "type": "security",
+      "label": "Acceso Denegado",
+      "sublabel": "Sin match o ACL no",
+      "tag": "Fail-Closed",
+      "width": 136
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_sso_decode",
+      "from": "sso_ingress",
+      "to": "decode_b64",
+      "variant": "default",
+      "role": "main"
+    },
+    {
+      "id": "e_decode_corrupt",
+      "from": "decode_b64",
+      "to": "err_corrupt",
+      "label": "B64 inválido",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e_decode_router",
+      "from": "decode_b64",
+      "to": "sso_policy",
+      "label": "Trama válida",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_sso_active",
+      "from": "sso_policy",
+      "to": "active_liveness",
+      "label": "SSO: active",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_active_fail",
+      "from": "active_liveness",
+      "to": "sso_rejected",
+      "label": "Fallo reto",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e_active_arcface",
+      "from": "active_liveness",
+      "to": "arcface_match",
+      "label": "Reto 3D OK",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_edge_policy",
+      "from": "edge_ingress",
+      "to": "edge_policy",
+      "variant": "default",
+      "role": "main"
+    },
+    {
+      "id": "e_policy_lbp",
+      "from": "edge_policy",
+      "to": "lbp_passive",
+      "label": "Inspección ON",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_lbp_fail",
+      "from": "lbp_passive",
+      "to": "edge_rejected",
+      "label": "Fallo LBP",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e_lbp_arcface",
+      "from": "lbp_passive",
+      "to": "arcface_match",
+      "label": "Textura OK",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_arcface_ok",
+      "from": "arcface_match",
+      "to": "access_ok",
+      "label": "Match & ACL OK",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e_arcface_denied",
+      "from": "arcface_match",
+      "to": "access_denied",
+      "label": "Sin match / ACL no",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Políticas de Inspección Anti-Spoofing",
+      "items": [
+        "active: Reto interactivo de parpadeo (EAR) y cabeceo cefálico (Yaw/Pitch/MAR)",
+        "passive: Extracción pasiva de textura LBP y EAR sin cooperación activa del usuario",
+        "none / bypass: Inferencia directa 1-shot o cámara Edge en zona física de alta confianza"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Resiliencia & Tolerancia a Fallos",
+      "items": [
+        "HTTP 422: Captura tramas base64 corruptas protegiendo los workers de FastAPI",
+        "Audit Ganache: Notarización inmutable con fallback local si la blockchain no responde",
+        "Fail-Closed: Toda anomalía o denegación de ACL bloquea el relé y deniega el token"
+      ]
+    }
+  ]
+}

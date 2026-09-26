@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "FaceSentinel — Secuencia de Autenticación (Web SSO y Hardware Físico)",
+    "output": "docs/diagrams/sequence_authentication.html",
+    "quality_profile": "showcase",
+    "viewBox": [1040, 595],
+    "column_fit": "spread",
+    "animation": "trace",
+    "views": [
+      {
+        "id": "web-sso-view",
+        "label": "Flujo Web SSO (Liveness Activo)",
+        "focus": ["browser", "api", "engine", "blockchain"],
+        "note": "Autenticación interactiva de usuario mediante reto-respuesta y emisión de JWT."
+      },
+      {
+        "id": "hardware-edge-view",
+        "label": "Flujo Hardware Físico (Edge Gateway)",
+        "focus": ["user", "edge", "api", "db", "engine"],
+        "note": "Acceso M2M autónomo con validación ACL, LBP y accionamiento de relé."
+      },
+      {
+        "id": "blockchain-audit-view",
+        "label": "Notarización Asíncrona Blockchain",
+        "focus": ["api", "blockchain"],
+        "note": "Registro inmutable desacoplado en el Smart Contract AccessRegistry."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "Usuario",
+      "sublabel": "Sujeto / Rostro"
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Web SSO",
+      "sublabel": "React UI"
+    },
+    {
+      "id": "edge",
+      "type": "frontend",
+      "label": "Edge GW",
+      "sublabel": "IoT / RTSP"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "REST & WS"
+    },
+    {
+      "id": "engine",
+      "type": "security",
+      "label": "Motor IA",
+      "sublabel": "Liveness & ArcFace"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "Storage",
+      "sublabel": "SQLite/Chroma"
+    },
+    {
+      "id": "blockchain",
+      "type": "cloud",
+      "label": "Ganache",
+      "sublabel": "Web3 Contract"
+    }
+  ],
+  "segments": [
+    {
+      "from": 145,
+      "to": 315,
+      "label": "Flujo 1: Web SSO (Liveness Activo Interactivo & JWT)"
+    },
+    {
+      "from": 325,
+      "to": 520,
+      "label": "Flujo 2: Acceso Físico Hardware (Edge M2M, LBP & Relé)"
+    }
+  ],
+  "messages": [
+    {
+      "id": "msg-ws-connect",
+      "from": "browser",
+      "to": "api",
+      "y": 160,
+      "label": "1. WS Connect /ws/liveness",
+      "variant": "emphasis"
+    },
+    {
+      "id": "msg-challenge",
+      "from": "api",
+      "to": "browser",
+      "y": 188,
+      "label": "2. Reto interactivo (Blink + Yaw/MAR)",
+      "variant": "security"
+    },
+    {
+      "id": "msg-stream-b64",
+      "from": "browser",
+      "to": "api",
+      "y": 216,
+      "label": "3. Stream frames Base64",
+      "variant": "default"
+    },
+    {
+      "id": "msg-verify-liveness",
+      "from": "api",
+      "to": "engine",
+      "y": 244,
+      "label": "4. Verifica Liveness Activo + ArcFace 512D",
+      "variant": "security"
+    },
+    {
+      "id": "msg-match-ok",
+      "from": "engine",
+      "to": "api",
+      "y": 272,
+      "label": "5. Identidad confirmada en ChromaDB (score >= 0.68)",
+      "variant": "return"
+    },
+    {
+      "id": "msg-emit-jwt",
+      "from": "api",
+      "to": "browser",
+      "y": 300,
+      "label": "6. Emite JWT Session Token (200 OK)",
+      "variant": "return"
+    },
+    {
+      "id": "msg-hw-auth-req",
+      "from": "edge",
+      "to": "api",
+      "y": 338,
+      "label": "7. POST /physical-access/authenticate (EAR local)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "msg-hw-check-acl",
+      "from": "api",
+      "to": "db",
+      "y": 366,
+      "label": "8. Validar Device Token & ACL (SQLite)",
+      "variant": "security"
+    },
+    {
+      "id": "msg-hw-check-lbp",
+      "from": "api",
+      "to": "engine",
+      "y": 394,
+      "label": "9. Inspección textura LBP & ArcFace 512D",
+      "variant": "security"
+    },
+    {
+      "id": "msg-hw-lbp-ok",
+      "from": "engine",
+      "to": "api",
+      "y": 422,
+      "label": "10. Acceso autorizado (LBP OK + Face Match)",
+      "variant": "return"
+    },
+    {
+      "id": "msg-hw-grant-access",
+      "from": "api",
+      "to": "edge",
+      "y": 450,
+      "label": "11. 200 OK (access_granted=true, unlock=true)",
+      "variant": "return"
+    },
+    {
+      "id": "msg-hw-open-door",
+      "from": "edge",
+      "to": "user",
+      "y": 478,
+      "label": "12. Pulso GPIO / Apertura física de relé",
+      "variant": "emphasis"
+    },
+    {
+      "id": "msg-hw-notarize",
+      "from": "api",
+      "to": "blockchain",
+      "y": 506,
+      "label": "13. Notarización asíncrona logAuthentication()",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "browser",
+      "from": 160,
+      "to": 305,
+      "type": "frontend"
+    },
+    {
+      "participant": "api",
+      "from": 160,
+      "to": 305,
+      "type": "backend"
+    },
+    {
+      "participant": "engine",
+      "from": 244,
+      "to": 276,
+      "type": "security"
+    },
+    {
+      "participant": "edge",
+      "from": 338,
+      "to": 482,
+      "type": "frontend"
+    },
+    {
+      "participant": "api",
+      "from": 338,
+      "to": 510,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 366,
+      "to": 390,
+      "type": "database"
+    },
+    {
+      "participant": "engine",
+      "from": 394,
+      "to": 426,
+      "type": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Arquitectura de Secuencia Dual",
+      "items": [
+        "Web SSO: Reto interactivo de liveness activo vía WebSocket y emisión de JWT tras verificación ArcFace",
+        "Acceso Físico: Filtro EAR local en Edge Gateway, validación ACL, inspección LBP, apertura de relé y notarización async"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "FaceSentinel — Arquitectura General del Sistema",
+    "output": "docs/diagrams/architecture_general.html",
+    "quality_profile": "showcase",
+    "viewBox": [1280, 520],
+    "views": [
+      {
+        "id": "e2e-auth",
+        "label": "Flujo Integral de Autenticación",
+        "focus": ["webapp", "edge_gw", "nginx", "fastapi", "img_bridge", "arcface", "sqlite"],
+        "note": "Trayectoria completa desde la captura del cliente hasta la validación de identidad."
+      },
+      {
+        "id": "liveness-pipeline",
+        "label": "Pipeline Anti-Spoofing",
+        "focus": ["fastapi", "img_bridge", "mediapipe", "lbp_engine"],
+        "note": "Aislamiento de la inspección biométrica activa (MediaPipe) y pasiva (LBP)."
+      },
+      {
+        "id": "persistence-audit",
+        "label": "Persistencia y Notarización",
+        "focus": ["fastapi", "arcface", "chromadb", "sqlite", "blockchain"],
+        "note": "Mecanismo de comparación vectorial y registro inmutable en blockchain."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "webapp",
+      "type": "frontend",
+      "label": "React Web App",
+      "sublabel": "Portal SSO & WebCam",
+      "pos": [40, 160],
+      "size": [140, 60]
+    },
+    {
+      "id": "edge_gw",
+      "type": "frontend",
+      "label": "Edge Gateway",
+      "sublabel": "Cámaras RTSP + EAR",
+      "pos": [40, 320],
+      "size": [140, 60]
+    },
+    {
+      "id": "nginx",
+      "type": "cloud",
+      "label": "Nginx Proxy",
+      "sublabel": "TLS & Rate Limiting",
+      "pos": [240, 240],
+      "size": [130, 60],
+      "tag": ":443 / :80"
+    },
+    {
+      "id": "fastapi",
+      "type": "backend",
+      "label": "FastAPI Core",
+      "sublabel": "REST & WebSockets",
+      "pos": [440, 240],
+      "size": [140, 60],
+      "tag": ":8000"
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite DB",
+      "sublabel": "Identidades, ACL & Logs",
+      "pos": [440, 80],
+      "size": [140, 60]
+    },
+    {
+      "id": "blockchain",
+      "type": "cloud",
+      "label": "Ganache Web3",
+      "sublabel": "Notarización Audit TX",
+      "pos": [440, 400],
+      "size": [140, 60],
+      "tag": "Fallback desacoplado"
+    },
+    {
+      "id": "img_bridge",
+      "type": "backend",
+      "label": "base64_to_image()",
+      "sublabel": "Puente & Sanitizado",
+      "pos": [660, 240],
+      "size": [150, 60]
+    },
+    {
+      "id": "mediapipe",
+      "type": "security",
+      "label": "MediaPipe FaceMesh",
+      "sublabel": "EAR, Pose 3D & MAR",
+      "pos": [890, 120],
+      "size": [150, 60]
+    },
+    {
+      "id": "lbp_engine",
+      "type": "security",
+      "label": "Motor LBP",
+      "sublabel": "Textura & Antispoofing",
+      "pos": [890, 240],
+      "size": [150, 60]
+    },
+    {
+      "id": "arcface",
+      "type": "backend",
+      "label": "ArcFace 512D",
+      "sublabel": "Embeddings biométricos",
+      "pos": [890, 360],
+      "size": [150, 60]
+    },
+    {
+      "id": "chromadb",
+      "type": "database",
+      "label": "ChromaDB",
+      "sublabel": "Colección vectorial",
+      "pos": [1110, 360],
+      "size": [140, 60]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Capa de Inferencia e Inteligencia",
+      "wraps": ["mediapipe", "lbp_engine", "arcface"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-webapp-nginx",
+      "from": "webapp",
+      "to": "nginx",
+      "label": "HTTPS / WSS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn-edge-nginx",
+      "from": "edge_gw",
+      "to": "nginx",
+      "label": "M2M HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn-nginx-fastapi",
+      "from": "nginx",
+      "to": "fastapi",
+      "label": "proxy_pass",
+      "variant": "default"
+    },
+    {
+      "id": "conn-fastapi-sqlite",
+      "from": "fastapi",
+      "to": "sqlite",
+      "label": "ACL & Users",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "conn-fastapi-blockchain",
+      "from": "fastapi",
+      "to": "blockchain",
+      "label": "Audit TX",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 30
+    },
+    {
+      "id": "conn-fastapi-bridge",
+      "from": "fastapi",
+      "to": "img_bridge",
+      "label": "Payload B64",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "conn-bridge-mediapipe",
+      "from": "img_bridge",
+      "to": "mediapipe",
+      "label": "Landmarks",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "conn-bridge-lbp",
+      "from": "img_bridge",
+      "to": "lbp_engine",
+      "label": "BGR Frame",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "conn-bridge-arcface",
+      "from": "img_bridge",
+      "to": "arcface",
+      "label": "Cropped Face",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "conn-arcface-chromadb",
+      "from": "arcface",
+      "to": "chromadb",
+      "label": "Cosine Query",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Capa Cliente & Edge",
+      "items": [
+        "React Web App gestiona la sesión SSO y captura WebCam interactiva",
+        "Edge Gateway procesa streams RTSP de hardware con filtro EAR local",
+        "Nginx asegura terminación SSL y mitigación DoS por rate-limiting"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Inferencia & Biometría",
+      "items": [
+        "base64_to_image() centraliza la sanitización de tramas en memoria",
+        "MediaPipe computa EAR (parpadeo), MAR (boca) y pose 3D de cabeza",
+        "Motor LBP evalúa entropía textural contra ataques de presentación 2D",
+        "ArcFace genera embeddings de 512D para comparación biométrica"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Persistencia & Confianza",
+      "items": [
+        "ChromaDB efectúa indexación y búsqueda por similitud de cosenos",
+        "SQLite resguarda perfiles, políticas ACL y dispositivos IoT enrolados",
+        "Ganache registra hashes de autenticación vía Smart Contract desacoplado"
+      ]
+    }
+  ]
+}
