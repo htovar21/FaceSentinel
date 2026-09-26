@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "FaceSentinel — Modelo Entidad-Relación Híbrido (SQLite, ChromaDB y Blockchain)",
+    "output": "docs/diagrams/erd_hybrid_storage.html",
+    "quality_profile": "showcase",
+    "viewBox": [1340, 560],
+    "animation": "trace",
+    "views": [
+      {
+        "id": "relational-view",
+        "label": "Motor Relacional (SQLite)",
+        "focus": ["tbl_users", "tbl_access_control_lists", "tbl_iot_devices", "tbl_oauth_clients", "tbl_access_logs"],
+        "note": "Gestión de identidades, control de acceso RBAC y logs de contingencia."
+      },
+      {
+        "id": "vector-view",
+        "label": "Motor Vectorial (ChromaDB)",
+        "focus": ["tbl_users", "col_faces"],
+        "note": "Almacenamiento de embeddings ArcFace de 512D con indexación HNSW por distancia coseno."
+      },
+      {
+        "id": "blockchain-view",
+        "label": "Auditoría On-Chain (Ethereum)",
+        "focus": ["col_faces", "struct_auth_record"],
+        "note": "Notarización inmutable de accesos preservando privacidad mediante hashes SHA-256."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "tbl_access_control_lists",
+      "type": "backend",
+      "label": "Tabla: access_control_lists (ACL)",
+      "sublabel": "id (PK, INT) | device_id (FK) | user_id (FK)",
+      "tag": "allowed_role (VARCHAR: RBAC Scope)",
+      "pos": [50, 120],
+      "size": [260, 70]
+    },
+    {
+      "id": "tbl_iot_devices",
+      "type": "backend",
+      "label": "Tabla: iot_devices",
+      "sublabel": "device_id (PK) | location | token_lookup_hash",
+      "tag": "client_secret_hash | lbp_thresh | antispoof",
+      "pos": [50, 250],
+      "size": [260, 70]
+    },
+    {
+      "id": "tbl_access_logs",
+      "type": "backend",
+      "label": "Tabla: access_logs (Fallback)",
+      "sublabel": "log_id (PK, INT) | user_id_hash (SHA-256)",
+      "tag": "device_id (FK) | status | timestamp (DT)",
+      "pos": [50, 380],
+      "size": [260, 70]
+    },
+    {
+      "id": "tbl_users",
+      "type": "backend",
+      "label": "Tabla: users",
+      "sublabel": "id (PK) | cedula (UQ) | nombre | apellido",
+      "tag": "rol (VARCHAR: RBAC) | is_active (BOOL)",
+      "pos": [370, 120],
+      "size": [260, 70]
+    },
+    {
+      "id": "tbl_oauth_clients",
+      "type": "backend",
+      "label": "Tabla: oauth_clients",
+      "sublabel": "client_id (PK) | app_name | redirect_uri",
+      "tag": "client_secret_hash | liveness_policy",
+      "pos": [370, 250],
+      "size": [260, 70]
+    },
+    {
+      "id": "col_faces",
+      "type": "security",
+      "label": "Colección: faces_collection",
+      "sublabel": "id (PK: user_id) | embedding (FLOAT32[512])",
+      "tag": "metadata (JSON: cedula) | index (HNSW: Cosine)",
+      "pos": [700, 120],
+      "size": [260, 70]
+    },
+    {
+      "id": "struct_auth_record",
+      "type": "database",
+      "label": "Struct: AuthRecord (AccessRegistry)",
+      "sublabel": "userId (SHA-256) | biometricHash (SHA-256)",
+      "tag": "timestamp | accessGranted | deviceId | matchScore",
+      "pos": [1030, 120],
+      "size": [260, 70]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "01 / Motor Relacional Local (SQLite + SQLAlchemy 2.0 ORM)",
+      "wraps": ["tbl_access_control_lists", "tbl_iot_devices", "tbl_access_logs", "tbl_users", "tbl_oauth_clients"]
+    },
+    {
+      "kind": "region",
+      "label": "02 / Motor Vectorial de Alta Dimensión (ChromaDB PersistentClient)",
+      "wraps": ["col_faces"]
+    },
+    {
+      "kind": "region",
+      "label": "03 / Registro Inmutable On-Chain (Ethereum Geth PoA)",
+      "wraps": ["struct_auth_record"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn_users_acl",
+      "from": "tbl_users",
+      "to": "tbl_access_control_lists",
+      "label": "1 : N (Permisos Usuario)",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [340, 200],
+      "variant": "default"
+    },
+    {
+      "id": "conn_devices_acl",
+      "from": "tbl_iot_devices",
+      "to": "tbl_access_control_lists",
+      "label": "1 : N (Reglas Recinto)",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [180, 220],
+      "variant": "default"
+    },
+    {
+      "id": "conn_devices_logs",
+      "from": "tbl_iot_devices",
+      "to": "tbl_access_logs",
+      "label": "1 : N (Respaldo Offline)",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [180, 350],
+      "variant": "default"
+    },
+    {
+      "id": "conn_users_faces",
+      "from": "tbl_users",
+      "to": "col_faces",
+      "label": "1 : 1 Vínculo Lógico (user_id)",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [665, 200],
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn_faces_auth",
+      "from": "col_faces",
+      "to": "struct_auth_record",
+      "label": "Hash Irreversible SHA-256 (Privacy by Design)",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [995, 200],
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Segregación Híbrida & Búsqueda O(1)",
+      "items": [
+        "SQLite gestiona identidades, RBAC y búsqueda O(1) por token_lookup_hash",
+        "ChromaDB ejecuta búsqueda vectorial HNSW por similitud coseno en milisegundos"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Privacidad Constitucional (Art. 28)",
+      "items": [
+        "Ninguna imagen cruda ni vector descubierto se expone on-chain",
+        "La Blockchain almacena únicamente hashes SHA-256 irreversibles"
+      ]
+    }
+  ]
+}
