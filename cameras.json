@@ -17,7 +17,7 @@
         "location": "Punto de Acceso",
         "enabled": true,
         "antispoofing_enabled": true,
-        "lbp_threshold": 3.563
+        "lbp_threshold": 3.530
     },
     {
         "device_id": "PASILLO62",
