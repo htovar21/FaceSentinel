@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "FaceSentinel — Arquitectura C4 por Capas (Sistemas Ciberfísicos)",
+    "quality_profile": "showcase",
+    "viewBox": [1380, 540]
+  },
+  "components": [
+    {
+      "id": "cctv_ip",
+      "type": "frontend",
+      "label": "Cámara CCTV / Sensor IP",
+      "sublabel": "Flujo RTSP (H.264 / TCP)",
+      "tag": "Sensor Físico",
+      "pos": [40, 70],
+      "size": [180, 64]
+    },
+    {
+      "id": "edge_gateway",
+      "type": "frontend",
+      "label": "Nodo Edge Gateway",
+      "sublabel": "OpenCV + MediaPipe EAR",
+      "tag": "Procesamiento Borde",
+      "pos": [40, 230],
+      "size": [180, 64]
+    },
+    {
+      "id": "m2m_payload",
+      "type": "frontend",
+      "label": "Señalización Lógica M2M",
+      "sublabel": "Payload JSON (Base64)",
+      "tag": "Mensajería",
+      "pos": [40, 390],
+      "size": [180, 64]
+    },
+    {
+      "id": "liveness_server",
+      "type": "backend",
+      "label": "Filtro Liveness Server",
+      "sublabel": "LBP + Desafío MAR/Yaw",
+      "tag": "Anti-Spoofing",
+      "pos": [350, 70],
+      "size": [190, 64]
+    },
+    {
+      "id": "api_gateway",
+      "type": "backend",
+      "label": "API Gateway Orquestador",
+      "sublabel": "FastAPI Core Asíncrono",
+      "tag": "Orquestador",
+      "pos": [350, 230],
+      "size": [190, 64]
+    },
+    {
+      "id": "arcface_inference",
+      "type": "backend",
+      "label": "Motor Inferencia Facial",
+      "sublabel": "ArcFace 512D Embeddings",
+      "tag": "Biometría",
+      "pos": [350, 390],
+      "size": [190, 64]
+    },
+    {
+      "id": "sqlite_persist",
+      "type": "database",
+      "label": "Persistencia Relacional",
+      "sublabel": "SQLite: RBAC / ACLs / Logs",
+      "tag": "Relacional",
+      "pos": [780, 70],
+      "size": [190, 64]
+    },
+    {
+      "id": "chroma_vector",
+      "type": "database",
+      "label": "Base Datos Vectorial",
+      "sublabel": "ChromaDB: HNSW Cosine",
+      "tag": "Vectorial",
+      "pos": [780, 230],
+      "size": [190, 64]
+    },
+    {
+      "id": "smart_contract",
+      "type": "security",
+      "label": "Smart Contract",
+      "sublabel": "AccessRegistry.sol",
+      "tag": "Web3 Contract",
+      "pos": [780, 390],
+      "size": [190, 64]
+    },
+    {
+      "id": "ethereum_poa",
+      "type": "security",
+      "label": "Red Privada Ethereum",
+      "sublabel": "Geth PoA / Clique",
+      "tag": "Blockchain",
+      "pos": [1140, 390],
+      "size": [190, 64]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "CAPA FÍSICA Y DE BORDE (EDGE)",
+      "wraps": ["cctv_ip", "edge_gateway", "m2m_payload"]
+    },
+    {
+      "kind": "region",
+      "label": "CAPA DE APLICACIÓN Y BACKEND",
+      "wraps": ["liveness_server", "api_gateway", "arcface_inference"]
+    },
+    {
+      "kind": "region",
+      "label": "CAPA DE ALMACENAMIENTO HÍBRIDO",
+      "wraps": ["sqlite_persist", "chroma_vector"]
+    },
+    {
+      "kind": "region",
+      "label": "CAPA DE AUDITORÍA DESCENTRALIZADA",
+      "wraps": ["smart_contract", "ethereum_poa"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn_rtsp_edge",
+      "from": "cctv_ip",
+      "to": "edge_gateway",
+      "label": "Flujo RTSP",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [130, 182],
+      "variant": "default"
+    },
+    {
+      "id": "conn_edge_fastapi",
+      "from": "edge_gateway",
+      "to": "api_gateway",
+      "label": "HTTP POST / JSON (Frame Base64)",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [285, 218],
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn_fastapi_m2m",
+      "from": "api_gateway",
+      "to": "m2m_payload",
+      "label": "HTTP 200 OK (Veredicto JSON: Granted/Denied)",
+      "fromSide": "left",
+      "toSide": "right",
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn_fastapi_liveness",
+      "from": "api_gateway",
+      "to": "liveness_server",
+      "label": "Reto / Verificación",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [445, 182],
+      "variant": "security"
+    },
+    {
+      "id": "conn_fastapi_arcface",
+      "from": "api_gateway",
+      "to": "arcface_inference",
+      "label": "Extracción 512D",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [445, 342],
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn_fastapi_sqlite",
+      "from": "api_gateway",
+      "to": "sqlite_persist",
+      "label": "Validación RBAC O(1)",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [[590, 262], [590, 102]],
+      "labelAt": [685, 92],
+      "variant": "default"
+    },
+    {
+      "id": "conn_fastapi_chroma",
+      "from": "api_gateway",
+      "to": "chroma_vector",
+      "label": "Búsqueda Coseno (d < 0.68)",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [685, 252],
+      "variant": "emphasis"
+    },
+    {
+      "id": "conn_fastapi_contract",
+      "from": "api_gateway",
+      "to": "smart_contract",
+      "label": "Web3 Asíncrona (SHA-256)",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [[590, 262], [590, 422]],
+      "labelAt": [685, 432],
+      "variant": "security"
+    },
+    {
+      "id": "conn_contract_geth",
+      "from": "smart_contract",
+      "to": "ethereum_poa",
+      "label": "Notarización TX / Clique",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [1055, 422],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Arquitectura Ciberfísica Desacoplada",
+      "items": [
+        "Filtro local EAR en Edge Gateway envía HTTP POST tras validar parpadeo",
+        "FastAPI autoriza y retorna HTTP 200 hacia Señalización Lógica M2M"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Almacenamiento Híbrido & Confianza Blockchain",
+      "items": [
+        "Búsqueda vectorial en ChromaDB y control de acceso relacional O(1) en SQLite",
+        "Auditoría inmutable de accesos en red privada Ethereum (Geth PoA / Clique)"
+      ]
+    }
+  ]
+}
